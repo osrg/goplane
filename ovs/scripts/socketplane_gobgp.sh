@@ -454,7 +454,7 @@ container_run() {
     result=$(echo $json | sed 's/[,{}]/\n/g' | sed 's/^".*":"\(.*\)"/\1/g' | awk -v RS="" '{ print $7, $8, $9, $10, $11 }')
 
     if [ "$attach" = "false" ]; then
-	bgp_mac_exchange $json
+	bgp_mac_exchange $json $cid
         echo $cid
     else
         docker attach $cid
@@ -466,8 +466,12 @@ bgp_mac_exchange() {
     parameters=`echo $1 | sed 's/[,{}]/\n/g' | sed 's/"//g'`
     cIp=`echo $parameters | sed 's/.*ip:\([^ ]*\).*/\1/'`
     cMac=`echo $parameters | sed 's/.*mac:\([^ ]*\).*/\1/'`
+    cNetwork=`info $cid | grep -e "network" | sed -e "s/[\"| |,|:]//g" | sed -e "s/network//"`
+    cVlan=`network_info $cNetwork | grep vlan | sed -e "s/\"vlan\": \([0-9]*\)/\1/"`
+
     echo "IP of the container: $cIp"
     echo "MAC of the container: $cMac"
+    echo "VLAN ID the container belongs: $cVlan"
     
     # communinate with the gobgpd running on the same machine
     # to ask it distribute the IP and MAC retrieved here
