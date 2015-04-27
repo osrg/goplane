@@ -61,8 +61,16 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
   # Socketplane demo boxes
   num_nodes = (ENV['SOCKETPLANE_NODES'] || 3).to_i
-  base_ip = "10.254.101."
-  socketplane_ips = num_nodes.times.collect { |n| base_ip + "#{n+21}" }
+  # Hacked by Soramichi Akiyama, NTT, to make it work correctly with Open vSwitch.
+  # The original version uses IPs such as 10.254.101.21 and
+  # the name of the vxlan port associated with this IP is 'vxlan-10.254.101.21'
+  # which is TOO LONG because an open flow port name must be under 16-character-long.
+  # This hack changes the used IPs to 10.9.9.2 or so
+  # to make sure that the port names do not exceed 16 characters.
+  base_ip = "10.9.9."
+  socketplane_ips = num_nodes.times.collect { |n| base_ip + "#{n+2}" }
+  # base_ip = "10.254.101."
+  # socketplane_ips = num_nodes.times.collect { |n| base_ip + "#{n+21}" }
   
   num_nodes.times do |n|
     config.vm.define "socketplane-#{n+1}" do |socketplane|
