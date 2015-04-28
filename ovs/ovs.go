@@ -25,8 +25,8 @@ import (
 
 const (
 	ArpResponderFlowTemplate = "priority=%d,dl_type=0x0806,nw_dst=%s,actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x%s->NXM_NX_ARP_SHA[],load:0x%s->NXM_OF_ARP_SPA[],output:in_port"
-	RemotePortSelectionFlowTemplate = "priority=%d,dl_dst=%s,actions=mod_vlan_vid:1,output:%s"
-	LocalPortSelectionFlowTemplate  = "priority=%d,dl_dst=%s,dl_vlan=1,actions=strip_vlan,output:" // no %s on the tail
+	RemotePortSelectionFlowTemplate = "priority=%d,dl_dst=%s,actions=mod_vlan_vid:%d,output:%s"
+	LocalPortSelectionFlowTemplate  = "priority=%d,dl_dst=%s,dl_vlan=%d,actions=strip_vlan,output:" // no %s on the tail
 )
 
 func Ipv4ToBytesStr(ip net.IP) string {
@@ -64,11 +64,13 @@ func addOvsRemotePortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string)
 		return
 	}
 
+	vni := n.MacIpAdv.Labels[0]
  	ip := net.ParseIP(n.MacIpAdv.IpAddr)
-	fmt.Printf("Add a RemotePortSelection flow for the container %s on %s\n", ip.String(), nexthop)
+	fmt.Printf("Add a RemotePortSelection flow for the container %s (vlan: %d) on %s\n", ip.String(), vni, nexthop)
 
 	// retrieve the port number to send packets for the new container
-	command := fmt.Sprintf("ovs-ofctl show docker0-ovs | grep %s | sed -e \"s/.*\\([0-9]\\)(.*/\\1/\"", nexthop) // TODO: what happens if a port number has more than 2 digits??
+	command := fmt.Sprintf("ovs-ofctl show docker0-ovs | grep %s | sed -e \"s/[^0-9]*\\([0-9]*\\)(.*/\\1/\"", nexthop)
+
 	out, err := exec.Command("sh", "-c", command).Output()
 
 	if err != nil {
@@ -80,7 +82,7 @@ func addOvsRemotePortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string)
 
 	// add a flow
  	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
-	flow := fmt.Sprintf(RemotePortSelectionFlowTemplate, 50, mac, port)
+	flow := fmt.Sprintf(RemotePortSelectionFlowTemplate, 50, mac, vni, port)
 
 	_, err = exec.Command("ovs-ofctl", "add-flow", "docker0-ovs", flow).Output()
 
@@ -95,8 +97,9 @@ func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) 
 		return
 	}
 
+	vni := n.MacIpAdv.Labels[0]
  	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
-	fmt.Printf("Add a LocalPortSelection flow for the container %s\n", mac.String())
+	fmt.Printf("Add a LocalPortSelection flow for the container %s (vlan: %d)\n", mac.String(), vni)
 
 	// retrieve ALL ovs ports connected to containers inside the host.
 	// it works because local BUM inside a host is not a big problem.
@@ -110,7 +113,7 @@ func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) 
 	}
 
 	// build a flow as a string
-	flow := fmt.Sprintf(LocalPortSelectionFlowTemplate, 50, mac)
+	flow := fmt.Sprintf(LocalPortSelectionFlowTemplate, 50, mac, vni)
 
 	for i, c := range out {
 		if(c != 10) {
