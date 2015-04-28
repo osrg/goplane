@@ -8,6 +8,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"time"
+	"strconv"
 )
 
 var globalOpts struct {
@@ -15,6 +16,7 @@ var globalOpts struct {
 	Port     int    `short:"p" long:"port" description:"specifying a port" default:"8080"`
 	Mac      string `short:"m" long:"mac" description:"specifying a mac address to advertise"`
 	IP      string `short:"i" long:"ip" description:"specifying an IP address to advertise"`
+	VNI     string `short:"v" long:"vni" description:"specifying a VNI (or VLAN ID) to that the MAC belongs"`
 }
 
 var client api.GrpcClient
@@ -34,17 +36,23 @@ func main(){
 		os.Exit(1)
 	}
 
+	if globalOpts.VNI == "" {
+		fmt.Println("specify a VNI that the MAC belongs with -v or --vni")
+		os.Exit(1)
+	}
+
 	timeout := grpc.WithTimeout(time.Second)
 	conn, _ := grpc.Dial(fmt.Sprintf("%s:%d", globalOpts.Host, globalOpts.Port), timeout)
 	client = api.NewGrpcClient(conn)
 
 	// advertise the mac and IP given with from the command line
-	addedMac := os.Args[1]
-	addedIp := os.Args[2]
+	addedMac := globalOpts.Mac
+	addedIp := globalOpts.IP
+	vni, _ := strconv.Atoi(globalOpts.VNI)
 	
 	var rt *api.AddressFamily
 	rt = api.AF_EVPN
-	
+
 	path := &api.Path{}
 	path.Nlri = &api.Nlri{
 		Af: rt,
@@ -53,6 +61,7 @@ func main(){
 			MacIpAdv: &api.EvpnMacIpAdvertisement{
 				MacAddr: addedMac,
 				IpAddr:  addedIp,
+				Labels: []uint32{uint32(vni)},
 			},
 		},
 	}
