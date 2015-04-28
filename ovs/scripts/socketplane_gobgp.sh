@@ -475,7 +475,7 @@ bgp_mac_exchange() {
     
     # communinate with the gobgpd running on the same machine
     # to ask it distribute the IP and MAC retrieved here
-    goaddmac -m $cMac -i $cIp
+    goaddmac -m $cMac -i $cIp -v $cVlan
 }
 
 container_stop() {
