@@ -13,23 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package netlink
+package config
 
-type VXLAN struct {
-	VNI uint32
+import bgp "github.com/osrg/gobgp/config"
+
+type VirtualNetwork struct {
+	VNI              uint32
+	VxlanPort        uint16
+	VtepInterface    string
+	Color            uint32
+	MemberInterfaces []string
 }
 
-func NewVXLAN(vni uint32) *VXLAN {
-	return &VXLAN{
-		VNI: vni,
-	}
+type Dataplane struct {
+	Type               string
+	VirtualNetworkList []VirtualNetwork
 }
 
-func (v *VXLAN) Serialize() []byte {
-	buf := make([]byte, 8)
-	buf[0] = 1 << 3
-	buf[4] = byte((v.VNI >> 16) & 0xff)
-	buf[5] = byte((v.VNI >> 8) & 0xff)
-	buf[6] = byte(v.VNI & 0xff)
-	return buf
+type Config struct {
+	Bgp       bgp.Bgp
+	Dataplane Dataplane
 }

@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package netlink
 
 //#include <sys/socket.h>
 //#include <netpacket/packet.h>
