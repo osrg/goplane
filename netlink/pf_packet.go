@@ -66,11 +66,15 @@ package main
 //}
 //int PFPacketRecv(int pd, void* buf, int len){
 //    int cnt;
-//    cnt = recv(pd, buf, len, 0);
+//    struct sockaddr_ll addr;
+//    socklen_t addr_len = sizeof(addr);
+//    cnt = recvfrom(pd, buf, len, 0, (struct sockaddr*)&addr, &addr_len);
 //    if(cnt < 0){
 //	return -1 * errno;
-//    }else{
+//    }else if(addr.sll_pkttype == PACKET_BROADCAST ) {
 //	return cnt;
+//    } else {
+//      return 0;
 //    }
 //}
 //void PFPacketClose(int fd){
@@ -100,11 +104,17 @@ func PFPacketClose(fd int) {
 func PFPacketRecv(fd int) ([]byte, error) {
 	//TODO get mtu by request
 	buf := make([]byte, 2000)
-	size := C.PFPacketRecv(C.int(fd), unsafe.Pointer(&buf[0]), C.int(len(buf)))
-	if size < 0 {
-		err := syscall.Errno(size * -1)
-		log.Errorf("failed to send a packet. err: %s", err)
-		return nil, fmt.Errorf("failed to recv a packet. size: %d", size)
+	var size int
+	for {
+		s := C.PFPacketRecv(C.int(fd), unsafe.Pointer(&buf[0]), C.int(len(buf)))
+		size = int(s)
+		if size < 0 {
+			err := syscall.Errno(size * -1)
+			log.Errorf("failed to send a packet. err: %s", err)
+			return nil, fmt.Errorf("failed to recv a packet. size: %d", size)
+		} else if size > 0 {
+			break
+		}
 	}
 	return buf[:size], nil
 }
