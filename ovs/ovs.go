@@ -26,7 +26,7 @@ import (
 const (
 	ArpResponderFlowTemplate = "priority=%d,dl_type=0x0806,nw_dst=%s,actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x%s->NXM_NX_ARP_SHA[],load:0x%s->NXM_OF_ARP_SPA[],output:in_port"
 	RemotePortSelectionFlowTemplate = "priority=%d,dl_dst=%s,actions=mod_vlan_vid:%d,output:%s"
-	LocalPortSelectionFlowTemplate  = "priority=%d,dl_dst=%s,dl_vlan=%d,actions=strip_vlan,output:" // no %s on the tail
+	LocalPortSelectionFlowTemplate  = "priority=%d,dl_dst=%s,dl_vlan=%d,actions=strip_vlan,output:%s"
 )
 
 func Ipv4ToBytesStr(ip net.IP) string {
@@ -99,31 +99,31 @@ func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) 
 
 	vni := n.MacIpAdv.Labels[0]
  	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
+	ip := net.ParseIP(n.MacIpAdv.IpAddr)
 	fmt.Printf("Add a LocalPortSelection flow for the container %s (vlan: %d)\n", mac.String(), vni)
 
-	// retrieve ALL ovs ports connected to containers inside the host.
-	// it works because local BUM inside a host is not a big problem.
-	// to retrieve the correct one requires the name of the invoked container (e.g. ovs36a00da), which is not in the current grpc schema of gobgpd.
-	command := "ovs-ofctl show docker0-ovs | grep -e \"(ovs\" | sed -e \"s/ *\\([0-9]*\\)(.*/\\1/\""
+	containers, networks := GetContainersInfo()
+	var portName string
+
+	for _, info := range containers {
+		// why does net.HardwareAddr not have Equal method??
+		if (ip.Equal(info.Ip) && mac.String() == info.Mac.String() && networks[info.Network].Vni == int(vni)) {
+			portName = info.PortName
+		}
+	}
+
+	command := "ovs-ofctl show docker0-ovs | grep -e \"" + portName + "\" | sed -e \"s/ *\\([0-9]*\\)(.*/\\1/\""
 	out, err := exec.Command("sh", "-c", command).Output()
 
 	if err != nil {
-		fmt.Println("Error: cannot find local ports")
+		fmt.Printf("Error: cannot find the local port %s\n", portName)
 		return
 	}
 
-	// build a flow as a string
-	flow := fmt.Sprintf(LocalPortSelectionFlowTemplate, 50, mac, vni)
+	port := string(out)
 
-	for i, c := range out {
-		if(c != 10) {
-			flow = fmt.Sprintf("%s%c", flow, c)
-		} else if(i != len(out) - 1) {
-			flow = fmt.Sprintf("%s,", flow)
-		} else {
-			// do nothing
-		}
-	}
+	// build a flow as a string
+	flow := fmt.Sprintf(LocalPortSelectionFlowTemplate, 50, mac, vni, port)
 
 	// add a flow
 	_, err = exec.Command("ovs-ofctl", "add-flow", "docker0-ovs", flow).Output()
