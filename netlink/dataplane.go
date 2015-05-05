@@ -196,13 +196,19 @@ func (d *Dataplane) Serve() error {
 
 	for {
 		select {
-		case err := <-d.t.Dying():
-			log.Error("dying!", err)
+		case <-d.t.Dying():
+			log.Error("dying! ", d.t.Err())
 			return nil
 		case p := <-d.modRibCh:
-			d.modRib(p)
+			err = d.modRib(p)
+			if err != nil {
+				log.Error("failed to mod rib: ", err)
+			}
 		case p := <-d.advPathCh:
-			d.advPath(p)
+			err = d.advPath(p)
+			if err != nil {
+				log.Error("failed to adv path: ", err)
+			}
 		}
 	}
 }

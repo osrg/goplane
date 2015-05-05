@@ -367,7 +367,8 @@ func (f *VirtualNetwork) modConnMap(path *api.Path) error {
 		log.Debugf("connect to %s", addr)
 		conn, err := net.DialUDP("udp", nil, udpAddr)
 		if err != nil {
-			log.Fatal(err)
+			log.Warnf("failed to dial UDP(%s) %s", addr, err)
+			return nil
 		}
 		f.connMap[addr] = conn
 
@@ -408,7 +409,7 @@ func (f *VirtualNetwork) modFdb(path *api.Path) error {
 
 		_, ok := f.vtepDstMap[color]
 		if !ok {
-			log.Warnf("no valid vtep dst for color: %d, pending: %v", color, f.pending)
+			log.Warnf("no valid vtep dst for color: %d, pending len: %d", color, len(f.pending))
 			f.pending = append(f.pending, path)
 			return nil
 		}
