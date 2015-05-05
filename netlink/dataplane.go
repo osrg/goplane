@@ -208,7 +208,11 @@ func (d *Dataplane) Serve() error {
 }
 
 func NewDataplane(config *config.ConfigSet) *Dataplane {
+	modRibCh := make(chan *api.Path, 16)
+	advPathCh := make(chan *api.Path, 16)
 	return &Dataplane{
-		config: config,
+		config:    config,
+		modRibCh:  modRibCh,
+		advPathCh: advPathCh,
 	}
 }
