@@ -218,7 +218,18 @@ func (n *VirtualNetwork) Serve() error {
 	}
 
 	n.t.Go(n.monitorBest)
-	n.t.Go(n.sniffPkt)
+	for _, member := range n.config.MemberInterfaces {
+		log.Debugf("start sniff %s", member)
+		_, fd, err := PFPacketBind(member)
+		if err != nil {
+			log.Errorf("failed to sniff %s", member)
+			return err
+		}
+
+		n.t.Go(func() error {
+			return n.sniffPkt(fd)
+		})
+	}
 	n.t.Go(n.monitorNetlink)
 
 	for {
@@ -560,18 +571,14 @@ func (f *VirtualNetwork) monitorBest() error {
 	return nil
 }
 
-func (f *VirtualNetwork) sniffPkt() error {
-	_, fd, err := PFPacketBind(f.config.MemberInterfaces[0])
-	if err != nil {
-		return err
-	}
-
+func (f *VirtualNetwork) sniffPkt(fd int) error {
 	for {
 		buf, err := PFPacketRecv(fd)
 		if err != nil {
+			log.Errorf("failed to recv from %s", fd)
 			return err
 		}
-		log.Debugf("recv from %s, len: %d", f.config.MemberInterfaces[0], len(buf))
+		log.Debugf("recv from %s, len: %d", fd, len(buf))
 		f.floodCh <- buf
 	}
 }
@@ -582,11 +589,16 @@ func (f *VirtualNetwork) monitorNetlink() error {
 		return err
 	}
 
-	link, err := netlink.LinkByName(f.config.MemberInterfaces[0])
-	if err != nil {
-		return err
+	idxs := make([]int, 0, len(f.config.MemberInterfaces))
+	for _, member := range f.config.MemberInterfaces {
+		link, err := netlink.LinkByName(member)
+		if err != nil {
+			log.Errorf("failed to get link %s", member)
+			return err
+		}
+		log.Debugf("monitoring: %s, index: %d", link.Attrs().Name, link.Attrs().Index)
+		idxs = append(idxs, link.Attrs().Index)
 	}
-	log.Debugf("monitoring: %s, index: %d", link.Attrs().Name, link.Attrs().Index)
 
 	for {
 		msgs, err := s.Recieve()
@@ -600,16 +612,17 @@ func (f *VirtualNetwork) monitorNetlink() error {
 			switch t {
 			case RTM_NEWNEIGH, RTM_DELNEIGH, RTM_GETNEIGH:
 				n, _ := netlink.NeighDeserialize(msg.Data)
-				if n.LinkIndex == link.Attrs().Index {
-					log.Debugf("mac: %s, ip: %s, index: %d, family: %s, state: %s, type: %s, flags: %s", n.HardwareAddr, n.IP, n.LinkIndex, NDA_TYPE(n.Family), NUD_TYPE(n.State), RTM_TYPE(n.Type), NTF_TYPE(n.Flags))
-					log.Debugf("from monitored interface")
-
-					// if we already have, proxy arp
-					// how to write back to interfaces ?
-					// write to bridge does work?
-					// do experiments
-					// get vxlan bridge
-					f.netlinkCh <- &netlinkEvent{n.HardwareAddr, n.IP, false}
+				for _, idx := range idxs {
+					if n.LinkIndex == idx {
+						log.Debugf("mac: %s, ip: %s, index: %d, family: %s, state: %s, type: %s, flags: %s", n.HardwareAddr, n.IP, n.LinkIndex, NDA_TYPE(n.Family), NUD_TYPE(n.State), RTM_TYPE(n.Type), NTF_TYPE(n.Flags))
+						log.Debugf("from monitored interface")
+						// if we already have, proxy arp
+						// how to write back to interfaces ?
+						// write to bridge does work?
+						// do experiments
+						// get vxlan bridge
+						f.netlinkCh <- &netlinkEvent{n.HardwareAddr, n.IP, false}
+					}
 				}
 			}
 		}
