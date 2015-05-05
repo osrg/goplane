@@ -33,7 +33,7 @@ def install_docker_and_tools():
     local('sh -c "echo deb https://get.docker.io/ubuntu docker main > /etc/apt/sources.list.d/docker.list"',
           capture=True)
     local("apt-get update", capture=True)
-    local("apt-get install -y --force-yes lxc-docker-1.3.2", capture=True)
+    local("apt-get install -y --force-yes lxc-docker-1.3.2 bridge-utils", capture=True)
     local("ln -sf /usr/bin/docker.io /usr/local/bin/docker", capture=True)
     local("gpasswd -a `whoami` docker", capture=True)
     local("wget https://raw.github.com/jpetazzo/pipework/master/pipework -O /usr/local/bin/pipework",
@@ -44,7 +44,7 @@ def install_docker_and_tools():
 
 def update_goplane():
     local("cp Dockerfile ../../")
-    local("cd ../../ && docker build -t goplane . && rm Dockerfile")
+    local("cd ../../ && docker build --no-cache -t goplane . && rm Dockerfile")
 
 def get_bridges():
     return local("brctl show | awk 'NR > 1{print $1}'",
@@ -323,17 +323,21 @@ if __name__ == '__main__':
         print "execute as root"
         sys.exit(1)
 
-    if len(args) > 0 and args[0] == 'prepare':
-        install_docker_and_tools()
-        sys.exit(0)
-    elif len(args) > 0 and args[0] == 'update':
-        update_goplane()
-        sys.exit(0)
-    elif len(args) > 0 and args[0] == 'clean':
-        for ctn in get_containers():
-            if ctn[0] == 'h' or ctn[0] == 'g':
-                local("docker rm -f {0}".format(ctn), capture=True)
-        sys.exit(0)
+    if len(args) > 0:
+        if args[0] == 'prepare':
+            install_docker_and_tools()
+            sys.exit(0)
+        elif args[0] == 'update':
+            update_goplane()
+            sys.exit(0)
+        elif args[0] == 'clean':
+            for ctn in get_containers():
+                if ctn[0] == 'h' or ctn[0] == 'g':
+                    local("docker rm -f {0}".format(ctn), capture=True)
+            sys.exit(0)
+        else:
+            print "usage: demo.py [prepare|update|clean]"
+            sys.exit(1)
 
     h1 = Container(name='h1', image='osrg/gobgp')
     h2 = Container(name='h2', image='osrg/gobgp')
