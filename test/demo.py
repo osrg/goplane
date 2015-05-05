@@ -25,8 +25,6 @@ import os
 import sys
 
 TEST_BASE_DIR = '/tmp/goplane'
-DEFAULT_GOPATH = '$HOME/.go'
-GOPATH = DEFAULT_GOPATH
 
 def install_docker_and_tools():
     print "start install packages of test environment."
@@ -54,8 +52,10 @@ def get_bridges():
 
 
 def get_containers():
-    return local("docker ps -a | awk 'NR > 1 {print $NF}'",
-                 capture=True).split('\n')
+    output = local("docker ps -a | awk 'NR > 1 {print $NF}'", capture=True)
+    if output == '':
+        return []
+    return output.split('\n')
 
 
 class CmdBuffer(list):
@@ -314,84 +314,76 @@ class GoPlaneContainer(BGPContainer):
 
 if __name__ == '__main__':
 
-    parser = OptionParser(usage="usage: %prog [--go-path <gopath>] [prepare|update|clean]")
-    parser.add_option("-g", "--go-path", type="string", dest="gopath",
-                      help="set go path (DEFAULT: {0})".format(DEFAULT_GOPATH),
-                      default=DEFAULT_GOPATH)
+    parser = OptionParser(usage="usage: %prog [prepare|update|clean]")
     options, args = parser.parse_args()
 
-    # parse via shell
-    gopath = local("echo {0}".format(options.gopath), capture=True)
+    os.chdir(os.path.abspath(os.path.dirname(__file__)))
 
-    with shell_env(GOPATH=gopath):
+    if os.getegid() != 0:
+        print "execute as root"
+        sys.exit(1)
 
-        os.chdir(os.path.abspath(os.path.dirname(__file__)))
+    if len(args) > 0 and args[0] == 'prepare':
+        install_docker_and_tools()
+        sys.exit(0)
+    elif len(args) > 0 and args[0] == 'update':
+        update_goplane()
+        sys.exit(0)
+    elif len(args) > 0 and args[0] == 'clean':
+        for ctn in get_containers():
+            if ctn[0] == 'h' or ctn[0] == 'g':
+                local("docker rm -f {0}".format(ctn), capture=True)
+        sys.exit(0)
 
-        if os.getegid() != 0:
-            print "execute as root"
-            sys.exit(1)
+    h1 = Container(name='h1', image='osrg/gobgp')
+    h2 = Container(name='h2', image='osrg/gobgp')
+    h3 = Container(name='h3', image='osrg/gobgp')
+    h4 = Container(name='h4', image='osrg/gobgp')
+    h5 = Container(name='h5', image='osrg/gobgp')
+    h6 = Container(name='h6', image='osrg/gobgp')
+    hosts = [h1, h2, h3, h4, h5, h6]
 
-        if len(args) > 0 and args[0] == 'prepare':
-            install_docker_and_tools()
-            sys.exit(0)
-        elif len(args) > 0 and args[0] == 'update':
-            update_goplane()
-            sys.exit(0)
-        elif len(args) > 0 and args[0] == 'clean':
-            for ctn in get_containers():
-                if ctn[0] == 'h' or ctn[0] == 'g':
-                    local("docker rm -f {0}".format(ctn), capture=True)
-            sys.exit(0)
+    g1 = GoPlaneContainer(name='g1', asn=65001, router_id='192.168.0.1')
+    g2 = GoPlaneContainer(name='g2', asn=65002, router_id='192.168.0.2')
+    g3 = GoPlaneContainer(name='g3', asn=65003, router_id='192.168.0.3')
+    bgps = [g1, g2, g3]
 
-        h1 = Container(name='h1', image='osrg/gobgp')
-        h2 = Container(name='h2', image='osrg/gobgp')
-        h3 = Container(name='h3', image='osrg/gobgp')
-        h4 = Container(name='h4', image='osrg/gobgp')
-        h5 = Container(name='h5', image='osrg/gobgp')
-        h6 = Container(name='h6', image='osrg/gobgp')
-        hosts = [h1, h2, h3, h4, h5, h6]
+    for idx, ctn in enumerate(bgps):
+        ctn.add_vn(10, 'vtep10', 10+idx, ['eth2', 'eth3'])
 
-        g1 = GoPlaneContainer(name='g1', asn=65001, router_id='192.168.0.1')
-        g2 = GoPlaneContainer(name='g2', asn=65002, router_id='192.168.0.2')
-        g3 = GoPlaneContainer(name='g3', asn=65003, router_id='192.168.0.3')
-        bgps = [g1, g2, g3]
+    ctns = bgps + hosts
+    [ctn.run() for ctn in ctns]
 
-        for idx, ctn in enumerate(bgps):
-            ctn.add_vn(10, 'vtep10', 10+idx, ['eth2', 'eth3'])
+    br01 = Bridge(name='br01', subnet='192.168.10.0/24')
+    [br01.addif(ctn, 'eth1') for ctn in bgps]
 
-        ctns = bgps + hosts
-        [ctn.run() for ctn in ctns]
+    for lfs, rfs in itertools.permutations(bgps, 2):
+        lfs.add_peer(rfs, evpn=True)
 
-        br01 = Bridge(name='br01', subnet='192.168.10.0/24')
-        [br01.addif(ctn, 'eth1') for ctn in bgps]
+    br02 = Bridge(name='br02', with_ip=False)
+    br02.addif(g1, 'eth2')
+    br02.addif(h1, 'eth1')
 
-        for lfs, rfs in itertools.permutations(bgps, 2):
-            lfs.add_peer(rfs, evpn=True)
+    br03 = Bridge(name='br03', with_ip=False)
+    br03.addif(g2, 'eth2')
+    br03.addif(h2, 'eth1')
 
-        br02 = Bridge(name='br02', with_ip=False)
-        br02.addif(g1, 'eth2')
-        br02.addif(h1, 'eth1')
+    br04 = Bridge(name='br04', with_ip=False)
+    br04.addif(g3, 'eth2')
+    br04.addif(h3, 'eth1')
 
-        br03 = Bridge(name='br03', with_ip=False)
-        br03.addif(g2, 'eth2')
-        br03.addif(h2, 'eth1')
+    br02 = Bridge(name='br05', with_ip=False)
+    br02.addif(g1, 'eth3')
+    br02.addif(h4, 'eth1')
 
-        br04 = Bridge(name='br04', with_ip=False)
-        br04.addif(g3, 'eth2')
-        br04.addif(h3, 'eth1')
+    br03 = Bridge(name='br06', with_ip=False)
+    br03.addif(g2, 'eth3')
+    br03.addif(h5, 'eth1')
 
-        br02 = Bridge(name='br05', with_ip=False)
-        br02.addif(g1, 'eth3')
-        br02.addif(h4, 'eth1')
+    br04 = Bridge(name='br07', with_ip=False)
+    br04.addif(g3, 'eth3')
+    br04.addif(h6, 'eth1')
 
-        br03 = Bridge(name='br06', with_ip=False)
-        br03.addif(g2, 'eth3')
-        br03.addif(h5, 'eth1')
+    [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(hosts)]
 
-        br04 = Bridge(name='br07', with_ip=False)
-        br04.addif(g3, 'eth3')
-        br04.addif(h6, 'eth1')
-
-        [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(hosts)]
-
-        [ctn.start_goplane() for ctn in bgps]
+    [ctn.start_goplane() for ctn in bgps]
