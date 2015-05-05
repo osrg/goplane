@@ -358,6 +358,8 @@ func (f *VirtualNetwork) modConnMap(path *api.Path) error {
 		if ok {
 			log.Debugf("refresh. close connection to %s", addr)
 			f.connMap[addr].Close()
+			delete(f.connMap, addr)
+			delete(f.vtepDstMap, color)
 		}
 		udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", addr, f.config.VxlanPort))
 		if err != nil {
