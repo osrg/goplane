@@ -52,6 +52,28 @@ type VirtualNetwork struct {
 	client     api.GrpcClient
 }
 
+func (n *VirtualNetwork) getPaths(client api.GrpcClient, af *api.AddressFamily) ([]*api.Path, error) {
+	arg := &api.Arguments{
+		Resource: api.Resource_GLOBAL,
+		Af:       af,
+	}
+	stream, err := client.GetRib(context.Background(), arg)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]*api.Path, 0)
+	for {
+		d, err := stream.Recv()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+		paths = append(paths, d.Paths[d.BestPathIdx])
+	}
+	return paths, nil
+}
+
 func (n *VirtualNetwork) Serve() error {
 	log.Debugf("vtep intf: %s", n.config.VtepInterface)
 	link, err := netlink.LinkByName(n.config.VtepInterface)
@@ -566,6 +588,14 @@ func (f *VirtualNetwork) monitorBest() error {
 			f.encapCh <- d
 		} else if d.Nlri.Af.Equal(api.AF_EVPN) {
 			f.evpnCh <- d
+		} else if d.Nlri.Af.Equal(api.AF_IPV4_UC) || d.Nlri.Af.Equal(api.AF_IPV6_UC) {
+			paths, err := f.getPaths(client, api.AF_ENCAP)
+			if err != nil {
+				log.Fatal("failed to get encap pash", err)
+			}
+			for _, p := range paths {
+				f.encapCh <- p
+			}
 		}
 	}
 	return nil
