@@ -381,7 +381,7 @@ func main() {
 
 	if globalOpts.VNI == 0 {
 		fmt.Println("VNI to assign (-v, --vni) not specified, set to default value 1")
-		vni = 0
+		vni = 1
 	} else {
 		vni = globalOpts.VNI
 	}
