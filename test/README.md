@@ -7,17 +7,20 @@ This demo shows l2-vpn construction using [evpn/vxlan](https://tools.ietf.org/ht
 you only need to type 3 commands to play (tested in Ubuntu trusty).
 
 1. install dependent python package to run demo.py
-```
-$ pip install -r ./pip-requires.txt
-```
+    
+     ```
+     $ pip install -r ./pip-requires.txt
+     ```
 2. install docker and other dependent tools. also create goplane container.
-```
-$ sudo ./demo.py -g $GOPATH prepare
-```
+    
+     ```
+     $ sudo ./demo.py -g $GOPATH prepare
+     ```
 3. run and play!
-```
-$ sudo ./demo.py -g $GOPATH
-```
+    
+     ```
+     $ sudo ./demo.py -g $GOPATH
+     ```
 
 ## How to play
 demo.py boots 3 goplane containers (g1 to g3) and 6 host containers (h1 to h6)
