@@ -18,8 +18,8 @@ package netlink
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/hogecamp/goplane/config"
 	"github.com/osrg/gobgp/api"
+	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
