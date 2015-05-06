@@ -14,12 +14,12 @@ you only need to type 3 commands to play (tested in Ubuntu trusty).
 2. install docker and other dependent tools. also create goplane container.
     
      ```
-     $ sudo ./demo.py -g $GOPATH prepare
+     $ sudo ./demo.py prepare
      ```
 3. run and play!
     
      ```
-     $ sudo ./demo.py -g $GOPATH
+     $ sudo ./demo.py
      ```
 
 ## How to play
