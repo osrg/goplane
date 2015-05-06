@@ -1,4 +1,4 @@
-demo.py
+goplane evpn/vxlan demo
 ===
 
 This demo shows l2-vpn construction using [evpn/vxlan](https://tools.ietf.org/html/draft-ietf-bess-evpn-overlay-01).
