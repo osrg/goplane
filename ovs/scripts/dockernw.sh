@@ -24,6 +24,7 @@ if [ $# -ne 3 ]; then
 fi
 
 subnetMask=24 # dummy default
+mac=`ip_to_mac $IP`
 ##################################################################
 
 # Create an OVS port to assign to the container
@@ -37,5 +38,6 @@ mkdir -p /var/run/netns
 ln -s /proc/$cpid/ns/net /var/run/netns/$cpid
 
 ip link set $portName netns $cpid
+ip netns exec $cpid ip link set $portName addr $mac
 ip netns exec $cpid ip addr add $IP/$subnetMask dev $portName
 ip netns exec $cpid ip link set $portName up
