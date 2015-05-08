@@ -36,7 +36,7 @@ mac=`ip_to_mac $IP`
 # 5-12: IP address shown in base 16 without any dots (e.g. $IP=="10.1.2.3" -> "0a010203")
 portName=`printf '%03x' $vlan`
 portName="o$portName"
-for d in `echo "$ip" | sed -e "s/\./ /g"`; do
+for d in `echo "$IP" | sed -e "s/\./ /g"`; do
     d16=`printf '%02x' $d`
     portName="$portName$d16"
 done

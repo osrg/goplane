@@ -38,6 +38,12 @@ func MacAddressToBytesStr(mac net.HardwareAddr) string {
 	return fmt.Sprintf("%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
 }
 
+func createPortName(ip net.IP, vni uint32) string {
+	// {ip:  "10.1.2.3", vni: "5"}  -> "o0050a010203"
+	// For the specification of naming ports, see the comments of dockernw.sh
+	return fmt.Sprintf("o%03x%s", vni, Ipv4ToBytesStr(ip))
+}
+
 func addOvsArpResponderFlow(n *api.EVPNNlri, nexthop string, myIp string) {
 	if nexthop == myIp || nexthop == "0.0.0.0" {
 		// Never add an Arp responder flow for a container running on myself
@@ -102,16 +108,7 @@ func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) 
 	ip := net.ParseIP(n.MacIpAdv.IpAddr)
 	fmt.Printf("Add a LocalPortSelection flow for the container %s (vlan: %d)\n", mac.String(), vni)
 
-	containers, networks := GetContainersInfo()
-	var portName string
-
-	for _, info := range containers {
-		// why does net.HardwareAddr not have Equal method??
-		if (ip.Equal(info.Ip) && mac.String() == info.Mac.String() && networks[info.Network].Vni == int(vni)) {
-			portName = info.PortName
-		}
-	}
-
+	portName := createPortName(ip, vni)
 	command := "ovs-ofctl show docker0-ovs | grep -e \"" + portName + "\" | sed -e \"s/ *\\([0-9]*\\)(.*/\\1/\""
 	out, err := exec.Command("sh", "-c", command).Output()
 
