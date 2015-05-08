@@ -28,7 +28,19 @@ mac=`ip_to_mac $IP`
 ##################################################################
 
 # Create an OVS port to assign to the container
-portName="o$IP"
+# A port name contains 12 characters
+#  1 234 56789012
+# |o|VNI|IP      |
+# 1   : "o"
+# 2-4 : VNI (VLAN id) shown in base 16 (e.g. $vlan==10 -> "00a"), which is long enough as a VLAN id is less than 0xfff (4095)
+# 5-12: IP address shown in base 16 without any dots (e.g. $IP=="10.1.2.3" -> "0a010203")
+portName=`printf '%03x' $vlan`
+portName="o$portName"
+for d in `echo "$ip" | sed -e "s/\./ /g"`; do
+    d16=`printf '%02x' $d`
+    portName="$portName$d16"
+done
+
 ovs-vsctl add-port docker0-ovs $portName tag=$vlan -- set Interface $portName type=internal
 
 # Set container network so that it is connected to the ovs port created above with the specified IP/VLAN
