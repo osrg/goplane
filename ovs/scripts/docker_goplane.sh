@@ -22,9 +22,50 @@ if [ $# -ne 3 ]; then
     exit 1
 fi
 
-
+# run a container
 cid=$(docker run --net=none -itd $image)
-mac=`ip_to_mac $IP`
 
-dockernw $cid $IP $vlan
+
+# Create mac address
+mac="02:42" # hard-coded prefix
+
+for d in `echo "$ip" | sed -e "s/\./ /g"`; do
+    # d:   each digit of the given IP (e.g. if ip=="10.1.0.5" then d: 10 1 0 5)
+    # d16: 2-digit-long base 16 expression of d padded with 0 (e.g. d16: 0a 01 00 05)
+    d16=`printf '%02x' $d`
+    mac="$mac:$d16"
+done
+
+
+# Create an OVS port to assign to the container
+# A port name contains 12 characters
+#  1 234 56789012
+# |o|VNI|IP      |
+# 1   : "o"
+# 2-4 : VNI (VLAN id) shown in base 16 (e.g. $vlan==10 -> "00a"), which is long enough as a VLAN id is less than 0xfff (4095)
+# 5-12: IP address shown in base 16 without any dots (e.g. $IP=="10.1.2.3" -> "0a010203")
+portName=`printf '%03x' $vlan`
+portName="o$portName"
+for d in `echo "$IP" | sed -e "s/\./ /g"`; do
+    d16=`printf '%02x' $d`
+    portName="$portName$d16"
+done
+
+ovs-vsctl add-port docker0-ovs $portName tag=$vlan -- set Interface $portName type=internal
+
+
+# Set container network so that it is connected to the ovs port created above with the specified IP/VLAN
+cpid=`docker inspect --format '{{.State.Pid}}' $cid`
+subnetMask=24
+
+mkdir -p /var/run/netns
+ln -s /proc/$cpid/ns/net /var/run/netns/$cpid
+
+ip link set $portName netns $cpid
+ip netns exec $cpid ip link set $portName addr $mac
+ip netns exec $cpid ip addr add $IP/$subnetMask dev $portName
+ip netns exec $cpid ip link set $portName up
+
+
+# advertise IP, mac, and VNI with BGP
 goaddmac -m $mac -i $IP -v $vlan
