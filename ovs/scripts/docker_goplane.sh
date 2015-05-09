@@ -29,13 +29,14 @@ cid=$(docker run --net=none -itd $image)
 # Create mac address
 mac="02:42" # hard-coded prefix
 
-for d in `echo "$ip" | sed -e "s/\./ /g"`; do
+for d in `echo "$IP" | sed -e "s/\./ /g"`; do
     # d:   each digit of the given IP (e.g. if ip=="10.1.0.5" then d: 10 1 0 5)
     # d16: 2-digit-long base 16 expression of d padded with 0 (e.g. d16: 0a 01 00 05)
     d16=`printf '%02x' $d`
     mac="$mac:$d16"
 done
 
+echo $mac
 
 # Create an OVS port to assign to the container
 # A port name contains 12 characters
