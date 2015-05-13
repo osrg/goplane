@@ -634,7 +634,7 @@ func (f *VirtualNetwork) monitorNetlink() error {
 	}
 
 	for {
-		msgs, err := s.Recieve()
+		msgs, err := s.Receive()
 		if err != nil {
 			return err
 		}
