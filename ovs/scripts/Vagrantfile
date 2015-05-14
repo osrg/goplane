@@ -38,9 +38,6 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   n_vms.times do |n|
     config.vm.define "goplane#{n+1}" do |ubuntu|
       ubuntu.vm.box = "ubuntu/trusty64"
-      # In case you run into "SSL certificate problem: unable to get local issuer certificate"
-      # and you do not have the time to address the issue properly, uncomment the following line
-      # socketplane.vm.box_download_insecure = true
       ip = "10.9.9.#{n+2}"
       index = n+1
       ubuntu.vm.hostname = "goplane#{index}"
