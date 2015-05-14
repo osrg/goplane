@@ -43,8 +43,8 @@ def install_docker_and_tools():
     update_goplane()
 
 def update_goplane():
-    local("cp Dockerfile ../../")
-    local("cd ../../ && docker build --no-cache -t goplane . && rm Dockerfile")
+    local("cp Dockerfile ../../../")
+    local("cd ../../../ && docker build --no-cache -t goplane . && rm Dockerfile")
 
 def get_bridges():
     return local("brctl show | awk 'NR > 1{print $1}'",
