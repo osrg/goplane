@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package ovs
 
 import (
 	"github.com/osrg/gobgp/api"
@@ -175,27 +175,10 @@ func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) 
 	}
 }
 
-// get the IP address of myself (there should be an easier way?)
-func getMyIp(iface string) string {
-	myIp := ""
-	command := fmt.Sprintf("/sbin/ifconfig %s | grep \"inet addr\" | sed \"s/.*inet addr:\\([0-9.]*\\).*/\\1/\"", iface)
-
-	out, err := exec.Command("sh", "-c", command).Output()
-
-	if err != nil {
-		fmt.Println(err)
-		myIp = "0.0.0.0"
-	} else {
-		myIp = strings.Trim(string(out), "\n")
-	}
-
-	return myIp
-}
-
-func addOvsFlows(n *api.EVPNNlri, nexthop string) {
+func addOvsFlows(n *api.EVPNNlri, nexthop string, RouterId net.IP) {
 	// TODO: select appropriate iface automatically
-	addOvsVniPushFlow(n, nexthop, getMyIp("eth1"))
-	addOvsArpResponderFlow(n, nexthop, getMyIp("eth1"))
-	addOvsRemotePortSelectionFlow(n, nexthop, getMyIp("eth1"))
-	addOvsLocalPortSelectionFlow(n, nexthop, getMyIp("eth1"))
+	addOvsVniPushFlow(n, nexthop, RouterId.String())
+	addOvsArpResponderFlow(n, nexthop, RouterId.String())
+	addOvsRemotePortSelectionFlow(n, nexthop, RouterId.String())
+	addOvsLocalPortSelectionFlow(n, nexthop, RouterId.String())
 }
