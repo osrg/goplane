@@ -5,7 +5,7 @@ VAGRANTFILE_API_VERSION = "2"
 
 $env = <<SCRIPT
 echo "export GOPATH=/home/vagrant/go" >> ~/.profile
-echo "export PATH=\$PATH:\$GOPATH/bin:/usr/local/go/bin" >> ~/.profile
+echo "export PATH=\$PATH:/usr/local/go/bin" >> ~/.profile
 SCRIPT
 
 $install = <<SCRIPT
@@ -25,16 +25,27 @@ cd /home/vagrant/go/src/github.com/osrg
 git clone https://github.com/osrg/gobgp
 cd gobgp
 git checkout evpn
-git pull
 cd ../
 git clone https://github.com/osrg/goplane
-cd goplane/ovs
-go get -v
+cd goplane/ovs/goaddmac
+go get -v && go build
+ln -s `pwd`/goaddmac /usr/local/bin/goaddmac
+cd ../../goplaned
+go get -v && go build
+ln -s `pwd`/goplaned /usr/local/bin/goplaned
+ln -s /vagrant/docker_goplane.sh /usr/local/bin/docker_goplane
+ln -s /vagrant/generate_config.sh /usr/local/bin/generate_config
 SCRIPT
 
 n_vms = 3
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  ips = ""
+  n_vms.times do |n|
+    ips += "10.9.9.#{n+2}"
+    ips += " "
+  end
+
   n_vms.times do |n|
     config.vm.define "goplane#{n+1}" do |ubuntu|
       ubuntu.vm.box = "ubuntu/trusty64"
@@ -54,6 +65,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
           ubuntu.vm.provision :shell, inline: "ovs-vsctl add-port docker0-ovs \"vxlan-10.9.9.#{m+2}\" -- set interface \"vxlan-10.9.9.#{m+2}\" type=vxlan options:remote_ip=10.9.9.#{m+2}"
         end
       end
+
+      ubuntu.vm.provision :shell, inline: "generate_config #{n+1} #{ips} > goplaned.conf"
     end
   end
 end
