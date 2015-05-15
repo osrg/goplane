@@ -20,7 +20,7 @@ for IP in $@; do
 done
 
 echo "[Bgp.Global]"
-echo "RouterId = $myIP"
+echo "RouterId = \"$myIP\""
 echo "As = $AsNumber"
 echo "[Bgp]"
 
