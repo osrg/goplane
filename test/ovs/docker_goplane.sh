@@ -16,15 +16,19 @@
 image=$1
 IP=$2
 vlan=$3
+name=$4
 
-if [ $# -ne 3 ]; then
-    echo "Usage: docker_goplane docker_image_to_invoke IP_to_assign VLAN_to_assign"
+if [ $# -lt 3 ]; then
+    echo "Usage: docker_goplane docker_image_to_invoke IP_to_assign VLAN_to_assign [name]"
     exit 1
 fi
 
 # run a container
-cid=$(docker run --net=none -itd $image)
-
+if [ "$name" = "" ]; then
+    cid=$(docker run --net=none -itd $image)
+else
+    cid=$(docker run --net=none --name $name -itd $image)
+fi
 
 # Create mac address
 mac="02:42" # hard-coded prefix
