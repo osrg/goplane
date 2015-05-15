@@ -75,7 +75,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         # Containers on the same VM
         #  1. have the same IP
         #  2. belong to different VxLAN
-        ubuntu.vm.provision :shell, inline: "docker_goplane ubuntu_tcpdump 192.168.0.#{n+2} #{v+10} Con#{(n_containers)*n+(v+1)}"
+        ubuntu.vm.provision :shell, inline: "docker_goplane ubuntu_tcpdump 192.168.0.#{n+2} #{v+10} c#{(n_containers)*n+(v+1)}"
       end
     end
   end
