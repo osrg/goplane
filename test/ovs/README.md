@@ -26,13 +26,11 @@ In this demo, 3 VMs (goplane1 to goplane3) and 6 containres (2 containers/VM) ar
 Let's see that goplane achieves a BUM less networking. Open a terminal and execute the following commands
 
     $ vagrant ssh goplane2
-    root@goplane3:~# docker exec -it c4 ip a
     root@goplane3:~# docker exec -it c4 tcpdump -vvv
 
 Open another terminal and hit as follows (not the it's not the same)
 
     $ vagrant ssh goplane3
-    root@goplane3:~# docker exec -it c5 ip a
     root@goplane3:~# docker exec -it c5 tcpdump -vvv
 
 You have logged in to c4 (192.168.0.3 on VxLAN '11') and c5 (192.168.0.4 on VxLAN '10'), and packets coming to each container are being captured by tcpdump.
