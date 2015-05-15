@@ -12,10 +12,11 @@ $install = <<SCRIPT
 export DEBIAN_FRONTEND=noninteractive
 apt-get update > /dev/null
 echo "------------ Installing Open vSwitch ------------"
-apt-get install -q -y openvswitch-switch
-sudo ovs-vsctl add-br docker0-ovs
+apt-get install -q -y --no-install-recommends openvswitch-switch gcc make
+ovs-vsctl add-br docker0-ovs
+ovs-ofctl del-flows docker0-ovs
 echo "------------ Installing Goplane ------------"
-apt-get install -q -y git
+apt-get install -q -y --no-install-recommends git
 curl -sSL https://get.docker.com/ubuntu/ | sh > /dev/null
 wget --quiet https://storage.googleapis.com/golang/go1.4.2.linux-amd64.tar.gz
 tar axf go1.4.2.linux-amd64.tar.gz
@@ -38,6 +39,7 @@ ln -s /vagrant/generate_config.sh /usr/local/bin/generate_config
 SCRIPT
 
 n_vms = 3
+n_containers = 2 # 2 containres each => 6 containers as the whole cluster
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   ips = ""
@@ -48,7 +50,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
   n_vms.times do |n|
     config.vm.define "goplane#{n+1}" do |ubuntu|
-      ubuntu.vm.box = "ubuntu/trusty64"
+      ubuntu.vm.box = "socketplane/ubuntu-14.10"
       ip = "10.9.9.#{n+2}"
       index = n+1
       ubuntu.vm.hostname = "goplane#{index}"
@@ -66,7 +68,15 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         end
       end
 
-      ubuntu.vm.provision :shell, inline: "generate_config #{n+1} #{ips} > goplaned.conf"
+      ubuntu.vm.provision :shell, inline: "generate_config #{n+1} #{ips} > goplaned.conf && goplaned -f goplaned.conf > goplaned.log &"
+
+      ubuntu.vm.provision :shell, inline: "cp /vagrant/Dockerfile . && docker build -t ubuntu_tcpdump --rm . > /dev/null && rm Dockerfile"
+      n_containers.times do |v|
+        # Containers on the same VM
+        #  1. have the same IP
+        #  2. belong to different VxLAN
+        ubuntu.vm.provision :shell, inline: "docker_goplane ubuntu_tcpdump 192.168.0.#{n+2} #{v+10} Con#{(n_containers)*n+(v+1)}"
+      end
     end
   end
 end
