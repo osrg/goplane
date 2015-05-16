@@ -376,17 +376,17 @@ if __name__ == '__main__':
     br04.addif(g3, 'eth2')
     br04.addif(h3, 'eth1')
 
-    br02 = Bridge(name='br05', with_ip=False)
-    br02.addif(g1, 'eth3')
-    br02.addif(h4, 'eth1')
+    br05 = Bridge(name='br05', with_ip=False)
+    br05.addif(g1, 'eth3')
+    br05.addif(h4, 'eth1')
 
-    br03 = Bridge(name='br06', with_ip=False)
-    br03.addif(g2, 'eth3')
-    br03.addif(h5, 'eth1')
+    br06 = Bridge(name='br06', with_ip=False)
+    br06.addif(g2, 'eth3')
+    br06.addif(h5, 'eth1')
 
-    br04 = Bridge(name='br07', with_ip=False)
-    br04.addif(g3, 'eth3')
-    br04.addif(h6, 'eth1')
+    br07 = Bridge(name='br07', with_ip=False)
+    br07.addif(g3, 'eth3')
+    br07.addif(h6, 'eth1')
 
     [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(hosts)]
 
