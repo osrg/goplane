@@ -334,6 +334,12 @@ if __name__ == '__main__':
             for ctn in get_containers():
                 if ctn[0] == 'h' or ctn[0] == 'g':
                     local("docker rm -f {0}".format(ctn), capture=True)
+
+            for i in range(7):
+                name = "br0" + str(i+1)
+                local("ip link set down dev {0}".format(name), capture=True)
+                local("ip link delete {0} type bridge".format(name), capture=True)
+
             sys.exit(0)
         else:
             print "usage: demo.py [prepare|update|clean]"
