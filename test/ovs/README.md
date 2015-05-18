@@ -79,15 +79,27 @@ Port 3 and port 4 are for containers running inside goplane1, and in this demo p
 
 Given the port settings above, let's see how tenant isolation is achieved.
 
+    $ vagrant ssh goplane1
     vagrant@goplane1:~$ sudo ovs-ofctl dump-flows docker0-ovs | grep 03 | grep vlan=10 | grep -v arp
     cookie=0x0, duration=12412.524s, table=1, n_packets=0, n_bytes=0, idle_age=12412, priority=50,dl_vlan=10,dl_dst=02:42:c0:a8:00:03 actions=output:1
 
-This command shows the open flow rule for packets that have VxLAN tag 10 and destination mac address 02:42:c0:a8:00:03.
-In the demo, c3 and c4 are assigned the mac address 02:42:c0:a8:00:03 (note that as they are in different tenants, this is highly possible to occur in real cases).
-Packets matching this rule are processed by two steps:
+This open flow rule matches packets having VxLAN tag 10 and destination 02:42:c0:a8:00:03, and sends the packet to port 1 (output:1). We refer this process "Remote Port Selection".
+Once packets are recieved at goplane2 (10.9.9.3, conncted to port 1), what we call "Local Port Selection" occurs.
 
- 1. Remote port selection: The packets are sent to port 1 because port 1 is connected to goplane2 (10.9.9.3) where c3 is hosted.
- 2. Local port selection: The packets received are delivered only to c3 thanks to rules of OVS in goplane2 that are similar to the ones we saw above for goplane1.
+    $ vagrant ssh goplane2
+    vagrant@goplane2:~$ sudo ovs-ofctl show docker0-ovs | grep addr
+    1(vxlan-10.9.9.2): addr:ba:c7:d9:da:0d:23
+    2(vxlan-10.9.9.4): addr:b6:8a:ea:0b:e8:9a
+    3(o00ac0a80003): addr:5a:38:2c:47:90:4e
+    4(o00bc0a80003): addr:5a:38:2c:47:90:4e
+    LOCAL(docker0-ovs): addr:5a:38:2c:47:90:4e
+    
+    vagrant@goplane2:~$ sudo ovs-ofctl dump-flows docker0-ovs | grep 03 | grep vlan=10
+    cookie=0x0, duration=366.627s, table=0, n_packets=0, n_bytes=0, idle_age=366, priority=50,dl_vlan=10,dl_dst=02:42:c0:a8:00:03 actions=strip_vlan,output:3
+
+In the demo, c3 and c4 are assigned the same mac address 02:42:c0:a8:00:03, which is highly possible to occur in real cases because they are in different tenants and know nothing about each other.
+However, packets to c3 and ones to c4 are distingushable by the VxLAN tag.
+The open flow rule above delivers packets with VxLAN tag 10 to the only one port that c3 is connected (output:3).
 
 Next, let's move on to how ARP requrests are handled inside OVS.
 The below command picks up open flow matching rules that is related to ARP packets for 192.168.0.3 with VxLAN tag 10.
