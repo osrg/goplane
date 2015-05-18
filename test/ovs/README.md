@@ -11,12 +11,17 @@ This demo shows how to build a BUM-less L2 overlay network by Goplane without us
  - [Oracle Virtual Box](https://www.virtualbox.org/)
  - [Vagrant](https://www.vagrantup.com/)
 
-3. Move to goplane/test/ovs directory and execute
+3. Install vagrant-cachier plugin because setting up the demo executes many 'apt-get's in VMs.
 
      ```
-     vagrant up
+     $ vagrant plugin install vagrant-cachier
      ```
 
+4. Move to goplane/test/ovs directory and execute
+
+     ```
+     $ vagrant up
+     ```
 
 ## How to play
 In this demo, 3 VMs (goplane1 to goplane3) and 6 containres (2 containers/VM) are booted and connected in the following topology.

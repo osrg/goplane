@@ -48,6 +48,8 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     ips += " "
   end
 
+  config.cache.scope = :box
+
   n_vms.times do |n|
     config.vm.define "goplane#{n+1}" do |ubuntu|
       ubuntu.vm.box = "socketplane/ubuntu-14.10"
