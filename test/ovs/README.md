@@ -57,9 +57,11 @@ This broadcasting increses CPU load for replicating the packet and making the ne
 In this demo, ARP packets are not broadcated nor replicated because the OVS in each host knows {IP, Mac, VxLAN tag} pairs and act as a proxy arp responder (in other words, an ARP packet sent from a container is just "hit back" at the OVS).
 
 ## Look deeper inside
-This section explains how the BUM-less overlay network is build using Open vSwitch (OVS) and BGP.
-The basic idea is that all {IP, Mac, VxLAN tag} mappings are advertised by BGP when a container is invoked and
-OVS in each host knows the exact port to which any pakcets should go through.
+This section explains how the BUM-less overlay network is build using Open vSwitch (OVS) and Border Gateway Protocol (BGP).
+The basic ideas are:
+
+1. All hosts (goplane1, 2 and 3) are peered with BGP and all {IP, Mac, VxLAN tag} mappings are advertised by BGP when a container is invoked.
+2. The OVS in each host is then configured to send packts to the exact port beyond which the destination container exists.
 
 First, type the below command to see the OVS port connection inside goplane1.
 
