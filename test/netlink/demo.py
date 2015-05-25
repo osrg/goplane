@@ -101,7 +101,7 @@ class Bridge(object):
         return "{0}/{1}".format(self._ip_generator.next(),
                                 self.subnet.prefixlen)
 
-    def addif(self, ctn, name=''):
+    def addif(self, ctn, name='', mac=''):
         if name == '':
             name = self.name
         self.ctns.append(ctn)
@@ -109,6 +109,9 @@ class Bridge(object):
             ctn.pipework(self, self.next_ip_address(), name)
         else:
             ctn.pipework(self, '0/0', name)
+
+        if mac != '':
+            ctn.local("ip link set addr {0} dev {1}".format(mac, name))
 
     def delete(self):
         local("ip link set down dev {0}".format(self.name), capture=True)
@@ -348,10 +351,12 @@ if __name__ == '__main__':
     h1 = Container(name='h1', image='osrg/gobgp')
     h2 = Container(name='h2', image='osrg/gobgp')
     h3 = Container(name='h3', image='osrg/gobgp')
-    h4 = Container(name='h4', image='osrg/gobgp')
-    h5 = Container(name='h5', image='osrg/gobgp')
-    h6 = Container(name='h6', image='osrg/gobgp')
-    hosts = [h1, h2, h3, h4, h5, h6]
+    j1 = Container(name='j1', image='osrg/gobgp')
+    j2 = Container(name='j2', image='osrg/gobgp')
+    j3 = Container(name='j3', image='osrg/gobgp')
+    hs = [h1, h2, h3]
+    js = [j1, j2, j3]
+    hosts = hs + js
 
     g1 = GoPlaneContainer(name='g1', asn=65001, router_id='192.168.0.1')
     g2 = GoPlaneContainer(name='g2', asn=65002, router_id='192.168.0.2')
@@ -359,7 +364,10 @@ if __name__ == '__main__':
     bgps = [g1, g2, g3]
 
     for idx, ctn in enumerate(bgps):
-        ctn.add_vn(10, 'vtep10', 10+idx, ['eth2', 'eth3'])
+        ctn.add_vn(10, 'vtep10', 10+idx, ['eth2'])
+
+    for idx, ctn in enumerate(bgps):
+        ctn.add_vn(20, 'vtep20', 10+idx, ['eth3'])
 
     ctns = bgps + hosts
     [ctn.run() for ctn in ctns]
@@ -372,28 +380,29 @@ if __name__ == '__main__':
 
     br02 = Bridge(name='br02', with_ip=False)
     br02.addif(g1, 'eth2')
-    br02.addif(h1, 'eth1')
+    br02.addif(h1, 'eth1', 'aa:aa:aa:aa:aa:01')
 
     br03 = Bridge(name='br03', with_ip=False)
     br03.addif(g2, 'eth2')
-    br03.addif(h2, 'eth1')
+    br03.addif(h2, 'eth1', 'aa:aa:aa:aa:aa:02')
 
     br04 = Bridge(name='br04', with_ip=False)
     br04.addif(g3, 'eth2')
-    br04.addif(h3, 'eth1')
+    br04.addif(h3, 'eth1', 'aa:aa:aa:aa:aa:03')
 
     br05 = Bridge(name='br05', with_ip=False)
     br05.addif(g1, 'eth3')
-    br05.addif(h4, 'eth1')
+    br05.addif(j1, 'eth1', 'aa:aa:aa:aa:aa:01')
 
     br06 = Bridge(name='br06', with_ip=False)
     br06.addif(g2, 'eth3')
-    br06.addif(h5, 'eth1')
+    br06.addif(j2, 'eth1', 'aa:aa:aa:aa:aa:02')
 
     br07 = Bridge(name='br07', with_ip=False)
     br07.addif(g3, 'eth3')
-    br07.addif(h6, 'eth1')
+    br07.addif(j3, 'eth1', 'aa:aa:aa:aa:aa:03')
 
-    [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(hosts)]
+    [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(hs)]
+    [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(js)]
 
     [ctn.start_goplane() for ctn in bgps]
