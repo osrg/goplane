@@ -468,6 +468,7 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 				MacIpAdv: &api.EvpnMacIpAdvertisement{
 					MacAddr: n.mac.String(),
 					IpAddr:  "0.0.0.0",
+					Labels:  []uint32{f.config.VNI},
 				},
 			},
 		},
