@@ -55,13 +55,18 @@ For the full documentation of gobgp command, see [gobgp](https://github.com/osrg
 In this demo, the subnet of virtual networks is both 10.10.10.0/24.
 assignment of the ip address and mac address for each hosts is
 
-h1 : 10.10.10.1/24, aa:aa:aa:aa:aa:01
-h2 : 10.10.10.2/24, aa:aa:aa:aa:aa:02
-h3 : 10.10.10.3/24, aa:aa:aa:aa:aa:03
 
-j1 : 10.10.10.1/24, aa:aa:aa:aa:aa:01
-j2 : 10.10.10.2/24, aa:aa:aa:aa:aa:02
-j3 : 10.10.10.3/24, aa:aa:aa:aa:aa:03
+|hostname| ip address    | mac address       |
+|:------:|:-------------:|:-----------------:|
+| h1     | 10.10.10.1/24 | aa:aa:aa:aa:aa:01 |
+| h2     | 10.10.10.2/24 | aa:aa:aa:aa:aa:02 |
+| h3     | 10.10.10.3/24 | aa:aa:aa:aa:aa:03 |
+
+|hostname| ip address    | mac address       |
+|:------:|:-------------:|:-----------------:|
+| j1     | 10.10.10.1/24 | aa:aa:aa:aa:aa:01 |
+| j2     | 10.10.10.2/24 | aa:aa:aa:aa:aa:02 |
+| j3     | 10.10.10.3/24 | aa:aa:aa:aa:aa:03 |
 
 You can see same ip address and mac address is assigned to each host.
 but evpn can distinguish them and provide multi-tenant network.
