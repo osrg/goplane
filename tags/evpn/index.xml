@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+      <title>Evpn on GoPlane </title>
+    <link>http://osrg.github.io/goplane/tags/evpn/</link>
+    <language>en-US</language>
+    <author>Enthusiastic Hugo User</author>
+    <rights>Copyright (c) 2014, Enthusiastic Hugo User; all rights reserved.</rights>
+    <updated>Sat, 13 Jun 2015 00:00:00 UTC</updated>
+    
+    <item>
+      <title>Interoperability with Cisco/Juniper</title>
+      <link>http://osrg.github.io/goplane/post/20150615/</link>
+      <pubDate>Sat, 13 Jun 2015 00:00:00 UTC</pubDate>
+      <author>Enthusiastic Hugo User</author>
+      <guid>http://osrg.github.io/goplane/post/20150615/</guid>
+      <description>&lt;div class=&#34;row&#34;&gt;
+&lt;div class=&#34;col-md-10 col-md-offset-1&#34;&gt;
+&lt;img src=&#34;http://osrg.github.io/goplane/images/interop.jpg&#34; class=&#34;img-responsive center-block&#34;&gt;&lt;/img&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+
+&lt;hr /&gt;
+
+&lt;p&gt;We checked GoPlane/GoBGP&amp;rsquo;s EVPN/VXLAN implementation works well with Cisco Nexus9000 series and Juniper QFX5100 at Interop Tokyo 2015 &lt;a href=&#34;http://www.interop.jp/2015/english/shownet/index.html&#34; title=&#34;Shownet&#34;&gt;Shownet&lt;/a&gt; !
+GoPlane/GoBGP was running on Quanta LY8/Cumulus Linux 2.5.2.&lt;/p&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>
