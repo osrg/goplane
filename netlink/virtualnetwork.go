@@ -39,17 +39,16 @@ type netlinkEvent struct {
 }
 
 type VirtualNetwork struct {
-	t          tomb.Tomb
-	connMap    map[string]net.Conn
-	vtepDstMap map[uint32]string
-	config     config.VirtualNetwork
-	global     bgpconf.Global
-	encapCh    chan *api.Path
-	evpnCh     chan *api.Path
-	floodCh    chan []byte
-	pending    []*api.Path
-	netlinkCh  chan *netlinkEvent
-	client     api.GrpcClient
+	t           tomb.Tomb
+	connMap     map[string]net.Conn
+	config      config.VirtualNetwork
+	global      bgpconf.Global
+	multicastCh chan *api.Path
+	macadvCh    chan *api.Path
+	floodCh     chan []byte
+	pending     []*api.Path
+	netlinkCh   chan *netlinkEvent
+	client      api.GrpcClient
 }
 
 func (n *VirtualNetwork) getPaths(client api.GrpcClient, af *api.AddressFamily) ([]*api.Path, error) {
@@ -190,57 +189,10 @@ func (n *VirtualNetwork) Serve() error {
 	defer conn.Close()
 	n.client = api.NewGrpcClient(conn)
 
-	path := &api.Path{
-		Nlri: &api.Nlri{
-			Af:     api.AF_ENCAP,
-			Prefix: n.global.RouterId.String(),
-		},
-	}
-
-	subTlv := &api.TunnelEncapSubTLV{
-		Type:  api.ENCAP_SUBTLV_TYPE_COLOR,
-		Color: n.config.Color,
-	}
-	tlv := &api.TunnelEncapTLV{
-		Type:   api.TUNNEL_TYPE_VXLAN,
-		SubTlv: []*api.TunnelEncapSubTLV{subTlv},
-	}
-	attr := &api.PathAttr{
-		Type:        api.BGP_ATTR_TYPE_TUNNEL_ENCAP,
-		TunnelEncap: []*api.TunnelEncapTLV{tlv},
-	}
-
-	path.Attrs = append(path.Attrs, attr)
-
-	arg := &api.ModPathArguments{
-		Resource: api.Resource_GLOBAL,
-		Path:     path,
-	}
-
-	log.Debugf("add encap: end point: %s, color: %d", n.global.RouterId, n.config.Color)
-
-	stream, err := n.client.ModPath(context.Background())
-	if err != nil {
-		return err
-	}
-
-	err = stream.Send(arg)
-	if err != nil {
-		return err
-	}
-	stream.CloseSend()
-
-	res, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-
-	if res.Code != api.Error_SUCCESS {
-		return fmt.Errorf("error: code: %d, msg: %s\n", res.Code, res.Msg)
-	}
+	n.sendMulticast()
 
 	n.t.Go(n.monitorBest)
-	for _, member := range n.config.MemberInterfaces {
+	for _, member := range n.config.SniffInterfaces {
 		log.Debugf("start sniff %s", member)
 		_, fd, err := PFPacketBind(member)
 		if err != nil {
@@ -259,14 +211,20 @@ func (n *VirtualNetwork) Serve() error {
 		case <-n.t.Dying():
 			log.Error("dying!!")
 			return nil
-		case e := <-n.encapCh:
+		case e := <-n.multicastCh:
+			if e.Nlri.EvpnNlri.MulticastEtag.Etag != n.config.Etag {
+				continue
+			}
 			err = n.modConnMap(e)
 
 			if err != nil {
 				log.Errorf("mod conn failed. kill main loop. err: %s", err)
 				return err
 			}
-		case v := <-n.evpnCh:
+		case v := <-n.macadvCh:
+			if v.Nlri.EvpnNlri.MacIpAdv.Etag != n.config.Etag {
+				continue
+			}
 			err = n.modFdb(v)
 			if err != nil {
 				log.Errorf("mod fdb failed. kill main loop. err: %s", err)
@@ -288,49 +246,15 @@ func (n *VirtualNetwork) Serve() error {
 	}
 }
 
-func extractColor(path *api.Path) uint32 {
-
-	var color uint32
-
-	iterSubTlvs := func(subTlvs []*api.TunnelEncapSubTLV) {
-		for _, subTlv := range subTlvs {
-			if subTlv.Type == api.ENCAP_SUBTLV_TYPE_COLOR {
-				color = subTlv.Color
-				break
-			}
-		}
-	}
-
-	iterTlvs := func(tlvs []*api.TunnelEncapTLV) {
-		for _, tlv := range tlvs {
-			if tlv.Type == api.TUNNEL_TYPE_VXLAN {
-				iterSubTlvs(tlv.SubTlv)
-				break
-			}
-		}
-	}
-
-	func(attrs []*api.PathAttr) {
-		for _, attr := range attrs {
-			if attr.Type == api.BGP_ATTR_TYPE_TUNNEL_ENCAP {
-				iterTlvs(attr.TunnelEncap)
-				break
-			}
-		}
-	}(path.Attrs)
-
-	return color
-}
-
 func (f *VirtualNetwork) modConnMap(path *api.Path) error {
-	addr := path.Nlri.Prefix
-	color := extractColor(path)
+	addr := path.Nexthop
+	etag := path.Nlri.EvpnNlri.MulticastEtag.Etag
 
 	if path.Nexthop == "0.0.0.0" {
 		return nil
 	}
 
-	log.Debugf("mod cannection map: nh %s, vtep addr %s color %d withdraw %t", path.Nexthop, path.Nlri.Prefix, color, path.IsWithdraw)
+	log.Debugf("mod cannection map: nh %s, vtep addr %s etag %d withdraw %t", path.Nexthop, path.Nlri.Prefix, etag, path.IsWithdraw)
 
 	if path.IsWithdraw {
 		_, ok := f.connMap[addr]
@@ -338,28 +262,15 @@ func (f *VirtualNetwork) modConnMap(path *api.Path) error {
 			return fmt.Errorf("can't find %s conn", addr)
 		}
 
-		_, ok = f.vtepDstMap[color]
-		if !ok {
-			return fmt.Errorf("can't find %s vtep dst", path.Nlri.Nexthop)
-		}
-
-		if f.vtepDstMap[color] != addr {
-			log.Debugf("already refreshed")
-			return nil
-		}
-
 		f.connMap[addr].Close()
 
 		delete(f.connMap, addr)
-
-		delete(f.vtepDstMap, color)
 	} else {
 		_, ok := f.connMap[addr]
 		if ok {
 			log.Debugf("refresh. close connection to %s", addr)
 			f.connMap[addr].Close()
 			delete(f.connMap, addr)
-			delete(f.vtepDstMap, color)
 		}
 		udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", addr, f.config.VxlanPort))
 		if err != nil {
@@ -373,22 +284,11 @@ func (f *VirtualNetwork) modConnMap(path *api.Path) error {
 			return nil
 		}
 		f.connMap[addr] = conn
-
-		if color > 0 {
-			_, ok = f.vtepDstMap[color]
-			if ok {
-				log.Debugf("refresh vtep dst %s", addr)
-			}
-			f.vtepDstMap[color] = addr
-			for _, p := range f.pending {
-				f.evpnCh <- p
-			}
-			f.pending = []*api.Path{}
-		}
-
 	}
-	log.Debugf("connMap: %s", f.connMap)
-	log.Debugf("vtepDstMap: %s", f.vtepDstMap)
+	log.WithFields(log.Fields{
+		"Topic": "virtualnetwork",
+		"Etag":  f.config.Etag,
+	}).Debugf("connMap: %s", f.connMap)
 	return nil
 }
 
@@ -398,9 +298,10 @@ func (f *VirtualNetwork) modFdb(path *api.Path) error {
 		return nil
 	}
 
-	color := extractColor(path)
-
-	log.Debugf("modFdb new path, prefix: %s, nexthop: %s, color: %d, withdraw: %t", path.Nlri.Prefix, path.Nexthop, color, path.IsWithdraw)
+	log.WithFields(log.Fields{
+		"Topic": "VirtualNetwork",
+		"Etag":  f.config.Etag,
+	}).Debugf("modFdb new path, prefix: %s, nexthop: %s, withdraw: %t", path.Nlri.Prefix, path.Nexthop, path.IsWithdraw)
 
 	var mac net.HardwareAddr
 	var ip net.IP
@@ -408,21 +309,17 @@ func (f *VirtualNetwork) modFdb(path *api.Path) error {
 	switch path.Nlri.EvpnNlri.Type {
 	case api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
 		mac, _ = net.ParseMAC(path.Nlri.EvpnNlri.MacIpAdv.MacAddr)
-
-		_, ok := f.vtepDstMap[color]
-		if !ok {
-			log.Warnf("no valid vtep dst for color: %d, pending len: %d", color, len(f.pending))
-			f.pending = append(f.pending, path)
-			return nil
-		}
-		ip = net.ParseIP(f.vtepDstMap[color])
+		ip = net.ParseIP(path.Nexthop)
 	default:
 		return fmt.Errorf("invalid evpn nlri type: %s", path.Nlri.EvpnNlri.Type)
 	}
 
 	link, err := netlink.LinkByName(f.config.VtepInterface)
 	if err != nil {
-		log.Debugf("failed lookup link by name: %s", f.config.VtepInterface)
+		log.WithFields(log.Fields{
+			"Topic": "VirtualNetwork",
+			"Etag":  f.config.Etag,
+		}).Debugf("failed lookup link by name: %s", f.config.VtepInterface)
 		return nil
 	}
 
@@ -438,12 +335,22 @@ func (f *VirtualNetwork) modFdb(path *api.Path) error {
 
 	if path.IsWithdraw {
 		err = netlink.NeighDel(n)
-		log.Debugf("del fdb: %s, %s", n, err)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"Topic": "VirtualNetwork",
+				"Etag":  f.config.Etag,
+			}).Errorf("failed to del fdb: %s, %s", n, err)
+		}
 	} else {
 		err = netlink.NeighAppend(n)
-		log.Debugf("add fdb: %s, %s", n, err)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"Topic": "VirtualNetwork",
+				"Etag":  f.config.Etag,
+			}).Debugf("failed to add fdb: %s, %s", n, err)
+		}
 	}
-	return nil
+	return err
 }
 
 func (f *VirtualNetwork) flood(pkt []byte) error {
@@ -453,9 +360,64 @@ func (f *VirtualNetwork) flood(pkt []byte) error {
 
 	for _, c := range f.connMap {
 		cnt, err := c.Write(b)
-		log.Debugf("send to %s: cnt:%d, err:%s", c.RemoteAddr(), cnt, err)
+		log.WithFields(log.Fields{
+			"Topic": "VirtualNetwork",
+			"Etag":  f.config.Etag,
+		}).Debugf("send to %s: cnt:%d, err:%s", c.RemoteAddr(), cnt, err)
+		if err != nil {
+			return err
+		}
 	}
 
+	return nil
+}
+
+func (n *VirtualNetwork) sendMulticast() error {
+	path := &api.Path{
+		Nlri: &api.Nlri{
+			Af: api.AF_EVPN,
+			EvpnNlri: &api.EVPNNlri{
+				Type: api.EVPN_TYPE_INCLUSIVE_MULTICAST_ETHERNET_TAG,
+				MulticastEtag: &api.EvpnInclusiveMulticastEthernetTag{
+					Etag: n.config.Etag,
+				},
+			},
+		},
+	}
+
+	attr := &api.PathAttr{
+		Type: api.BGP_ATTR_TYPE_PMSI_TUNNEL,
+		PmsiTunnel: &api.PmsiTunnel{
+			Type:  api.PMSI_TUNNEL_TYPE_INGRESS_REPL,
+			Label: n.config.VNI,
+		},
+	}
+
+	path.Attrs = append(path.Attrs, attr)
+
+	arg := &api.ModPathArguments{
+		Resource: api.Resource_GLOBAL,
+		Path:     path,
+	}
+
+	stream, err := n.client.ModPath(context.Background())
+	if err != nil {
+		return err
+	}
+
+	err = stream.Send(arg)
+	if err != nil {
+		return err
+	}
+	stream.CloseSend()
+
+	res, err := stream.CloseAndRecv()
+	if err != nil {
+		return err
+	}
+	if res.Code != api.Error_SUCCESS {
+		return fmt.Errorf("error: code: %d, msg: %s\n", res.Code, res.Msg)
+	}
 	return nil
 }
 
@@ -468,26 +430,12 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 				MacIpAdv: &api.EvpnMacIpAdvertisement{
 					MacAddr: n.mac.String(),
 					IpAddr:  "0.0.0.0",
+					Etag:    uint32(f.config.Etag),
 					Labels:  []uint32{f.config.VNI},
 				},
 			},
 		},
 	}
-
-	subTlv := &api.TunnelEncapSubTLV{
-		Type:  api.ENCAP_SUBTLV_TYPE_COLOR,
-		Color: uint32(f.config.Color),
-	}
-	tlv := &api.TunnelEncapTLV{
-		Type:   api.TUNNEL_TYPE_VXLAN,
-		SubTlv: []*api.TunnelEncapSubTLV{subTlv},
-	}
-	attr := &api.PathAttr{
-		Type:        api.BGP_ATTR_TYPE_TUNNEL_ENCAP,
-		TunnelEncap: []*api.TunnelEncapTLV{tlv},
-	}
-
-	path.Attrs = append(path.Attrs, attr)
 
 	path.IsWithdraw = n.isWithdraw
 	arg := &api.ModPathArguments{
@@ -506,7 +454,7 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	}
 	stream.CloseSend()
 
-	res, err := stream.Recv()
+	res, err := stream.CloseAndRecv()
 	if err != nil {
 		return err
 	}
@@ -529,30 +477,6 @@ func (f *VirtualNetwork) monitorBest() error {
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
-		Af:       api.AF_ENCAP,
-	}
-	err = func() error {
-		stream, err := client.GetRib(context.Background(), arg)
-		if err != nil {
-			return err
-		}
-		for {
-			d, err := stream.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
-			}
-			f.encapCh <- d.Paths[d.BestPathIdx]
-		}
-		return nil
-	}()
-	if err != nil {
-		return err
-	}
-
-	arg = &api.Arguments{
-		Resource: api.Resource_GLOBAL,
 		Af:       api.AF_EVPN,
 	}
 	err = func() error {
@@ -567,7 +491,13 @@ func (f *VirtualNetwork) monitorBest() error {
 			} else if err != nil {
 				return err
 			}
-			f.evpnCh <- d.Paths[d.BestPathIdx]
+			bestpath := d.Paths[d.BestPathIdx]
+			switch bestpath.Nlri.EvpnNlri.Type {
+			case api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
+				f.macadvCh <- bestpath
+			case api.EVPN_TYPE_INCLUSIVE_MULTICAST_ETHERNET_TAG:
+				f.multicastCh <- bestpath
+			}
 		}
 		return nil
 	}()
@@ -588,17 +518,12 @@ func (f *VirtualNetwork) monitorBest() error {
 			return err
 		}
 
-		if d.Nlri.Af.Equal(api.AF_ENCAP) {
-			f.encapCh <- d
-		} else if d.Nlri.Af.Equal(api.AF_EVPN) {
-			f.evpnCh <- d
-		} else if d.Nlri.Af.Equal(api.AF_IPV4_UC) || d.Nlri.Af.Equal(api.AF_IPV6_UC) {
-			paths, err := f.getPaths(client, api.AF_ENCAP)
-			if err != nil {
-				log.Fatal("failed to get encap pash", err)
-			}
-			for _, p := range paths {
-				f.encapCh <- p
+		if d.Nlri.Af.Equal(api.AF_EVPN) {
+			switch d.Nlri.EvpnNlri.Type {
+			case api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
+				f.macadvCh <- d
+			case api.EVPN_TYPE_INCLUSIVE_MULTICAST_ETHERNET_TAG:
+				f.multicastCh <- d
 			}
 		}
 	}
@@ -612,7 +537,10 @@ func (f *VirtualNetwork) sniffPkt(fd int) error {
 			log.Errorf("failed to recv from %s", fd)
 			return err
 		}
-		log.Debugf("recv from %s, len: %d", fd, len(buf))
+		log.WithFields(log.Fields{
+			"Topic": "VirtualNetwork",
+			"Etag":  f.config.Etag,
+		}).Debugf("recv from %s, len: %d", fd, len(buf))
 		f.floodCh <- buf
 	}
 }
@@ -623,14 +551,17 @@ func (f *VirtualNetwork) monitorNetlink() error {
 		return err
 	}
 
-	idxs := make([]int, 0, len(f.config.MemberInterfaces))
-	for _, member := range f.config.MemberInterfaces {
+	idxs := make([]int, 0, len(f.config.SniffInterfaces))
+	for _, member := range f.config.SniffInterfaces {
 		link, err := netlink.LinkByName(member)
 		if err != nil {
 			log.Errorf("failed to get link %s", member)
 			return err
 		}
-		log.Debugf("monitoring: %s, index: %d", link.Attrs().Name, link.Attrs().Index)
+		log.WithFields(log.Fields{
+			"Topic": "VirtualNetwork",
+			"Etag":  f.config.Etag,
+		}).Debugf("monitoring: %s, index: %d", link.Attrs().Name, link.Attrs().Index)
 		idxs = append(idxs, link.Attrs().Index)
 	}
 
@@ -648,7 +579,10 @@ func (f *VirtualNetwork) monitorNetlink() error {
 				n, _ := netlink.NeighDeserialize(msg.Data)
 				for _, idx := range idxs {
 					if n.LinkIndex == idx {
-						log.Debugf("mac: %s, ip: %s, index: %d, family: %s, state: %s, type: %s, flags: %s", n.HardwareAddr, n.IP, n.LinkIndex, NDA_TYPE(n.Family), NUD_TYPE(n.State), RTM_TYPE(n.Type), NTF_TYPE(n.Flags))
+						log.WithFields(log.Fields{
+							"Topic": "VirtualNetwork",
+							"Etag":  f.config.Etag,
+						}).Debugf("mac: %s, ip: %s, index: %d, family: %s, state: %s, type: %s, flags: %s", n.HardwareAddr, n.IP, n.LinkIndex, NDA_TYPE(n.Family), NUD_TYPE(n.State), RTM_TYPE(n.Type), NTF_TYPE(n.Flags))
 						log.Debugf("from monitored interface")
 						// if we already have, proxy arp
 						// how to write back to interfaces ?
@@ -664,19 +598,18 @@ func (f *VirtualNetwork) monitorNetlink() error {
 }
 
 func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global) *VirtualNetwork {
-	encapCh := make(chan *api.Path, 16)
-	evpnCh := make(chan *api.Path, 16)
+	macadvCh := make(chan *api.Path, 16)
+	multicastCh := make(chan *api.Path, 16)
 	floodCh := make(chan []byte, 16)
 	netlinkCh := make(chan *netlinkEvent, 16)
 
 	return &VirtualNetwork{
-		config:     config,
-		global:     global,
-		connMap:    map[string]net.Conn{},
-		vtepDstMap: map[uint32]string{},
-		encapCh:    encapCh,
-		evpnCh:     evpnCh,
-		floodCh:    floodCh,
-		netlinkCh:  netlinkCh,
+		config:      config,
+		global:      global,
+		connMap:     map[string]net.Conn{},
+		macadvCh:    macadvCh,
+		multicastCh: multicastCh,
+		floodCh:     floodCh,
+		netlinkCh:   netlinkCh,
 	}
 }

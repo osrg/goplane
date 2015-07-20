@@ -21,7 +21,8 @@ type VirtualNetwork struct {
 	VNI              uint32
 	VxlanPort        uint16
 	VtepInterface    string
-	Color            uint32
+	Etag             uint32
+	SniffInterfaces  []string
 	MemberInterfaces []string
 }
 

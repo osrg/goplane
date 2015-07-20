@@ -52,7 +52,7 @@ func (d *Dataplane) advPath(p *api.Path) error {
 	}
 	stream.CloseSend()
 
-	res, err := stream.Recv()
+	res, err := stream.CloseAndRecv()
 	if err != nil {
 		return err
 	}

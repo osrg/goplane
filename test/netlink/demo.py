@@ -43,6 +43,7 @@ def install_docker_and_tools():
     update_goplane()
 
 def update_goplane():
+    local("docker pull osrg/gobgp")
     local("cp Dockerfile ../../../")
     local("cd ../../../ && docker build --no-cache -t goplane . && rm Dockerfile")
 
@@ -205,8 +206,6 @@ class BGPContainer(Container):
                             'policies': policies,
                             'passive' : passive}
         self.create_config()
-        if self.is_running:
-            self.reload_config()
 
     def del_peer(self, peer):
         del self.peers[peer]
@@ -272,8 +271,6 @@ class GoPlaneContainer(BGPContainer):
 
             if info['evpn']:
                 afi_safi_list.append({'AfiSafiName': 'l2vpn-evpn'})
-                afi_safi_list.append({'AfiSafiName': 'encap'})
-                afi_safi_list.append({'AfiSafiName': 'rtc'})
 
             n = {'NeighborAddress': info['neigh_addr'].split('/')[0],
                  'PeerAs': peer.asn,
@@ -297,7 +294,8 @@ class GoPlaneContainer(BGPContainer):
             dplane_config['VirtualNetworkList'].append({'VNI': info['vni'],
                                                         'VxlanPort': info['vxlan_port'],
                                                         'VtepInterface': info['vtep'],
-                                                        'Color': info['color'],
+                                                        'Etag': info['color'],
+                                                        'SniffInterfaces': info['member'],
                                                         'MemberInterfaces': info['member']})
 
         config = {'Bgp': bgp_config, 'Dataplane': dplane_config}
@@ -307,7 +305,7 @@ class GoPlaneContainer(BGPContainer):
             f.write(toml.dumps(config))
 
     def reload_config(self):
-        cmd = 'docker exec {0} /usr/bin/pkill gobgpd -SIGHUP'.format(self.name)
+        cmd = 'docker exec {0} /usr/bin/pkill goplaned -SIGHUP'.format(self.name)
         local(cmd, capture=True)
 
     def add_vn(self, vni, vtep, color, member, vxlan_port=8472):
@@ -358,16 +356,16 @@ if __name__ == '__main__':
     js = [j1, j2, j3]
     hosts = hs + js
 
-    g1 = GoPlaneContainer(name='g1', asn=65001, router_id='192.168.0.1')
-    g2 = GoPlaneContainer(name='g2', asn=65002, router_id='192.168.0.2')
-    g3 = GoPlaneContainer(name='g3', asn=65003, router_id='192.168.0.3')
+    g1 = GoPlaneContainer(name='g1', asn=65000, router_id='192.168.0.1')
+    g2 = GoPlaneContainer(name='g2', asn=65000, router_id='192.168.0.2')
+    g3 = GoPlaneContainer(name='g3', asn=65000, router_id='192.168.0.3')
     bgps = [g1, g2, g3]
 
     for idx, ctn in enumerate(bgps):
-        ctn.add_vn(10, 'vtep10', 10+idx, ['eth2'])
+        ctn.add_vn(10, 'vtep10', 10, ['eth2'])
 
     for idx, ctn in enumerate(bgps):
-        ctn.add_vn(20, 'vtep20', 10+idx, ['eth3'])
+        ctn.add_vn(20, 'vtep20', 20, ['eth3'])
 
     ctns = bgps + hosts
     [ctn.run() for ctn in ctns]
