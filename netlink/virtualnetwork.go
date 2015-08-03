@@ -147,7 +147,7 @@ func (n *VirtualNetwork) Serve() error {
 			Name: n.config.VtepInterface,
 		},
 		VxlanId: int(n.config.VNI),
-		SrcAddr: n.global.RouterId,
+		SrcAddr: n.global.GlobalConfig.RouterId,
 	}
 
 	log.Debugf("add %s", n.config.VtepInterface)

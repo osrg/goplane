@@ -79,7 +79,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	route := &netlink.Route{
 		LinkIndex: routes[0].LinkIndex,
 		Dst:       net,
-		Src:       d.config.Bgp.Global.RouterId,
+		Src:       d.config.Bgp.Global.GlobalConfig.RouterId,
 	}
 	return netlink.RouteAdd(route)
 }
@@ -158,7 +158,7 @@ func (d *Dataplane) Serve() error {
 		return fmt.Errorf("failed to get addr list of lo")
 	}
 
-	routerId := d.config.Bgp.Global.RouterId.String()
+	routerId := d.config.Bgp.Global.GlobalConfig.RouterId.String()
 
 	addr, err := netlink.ParseAddr(routerId + "/32")
 	if err != nil {

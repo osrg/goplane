@@ -166,7 +166,7 @@ func main() {
 			if bgpConfig == nil {
 				bgpServer.SetGlobalType(newConfig.Bgp.Global)
 				bgpConfig = &newConfig.Bgp
-				added = newConfig.Bgp.NeighborList
+				added = newConfig.Bgp.Neighbors.NeighborList
 				deleted = []bgpconf.Neighbor{}
 			} else {
 				bgpConfig, added, deleted = bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)

@@ -253,7 +253,7 @@ class GoPlaneContainer(BGPContainer):
         return self.WAIT_FOR_BOOT
 
     def create_config(self):
-        bgp_config = {'Global': {'As': self.asn, 'RouterId': self.router_id}}
+        bgp_config = {'Global': {'GlobalConfig': {'As': self.asn, 'RouterId': self.router_id}}}
         for peer, info in self.peers.iteritems():
             if self.asn == peer.asn:
                 peer_type = self.PEER_TYPE_INTERNAL
@@ -272,11 +272,13 @@ class GoPlaneContainer(BGPContainer):
             if info['evpn']:
                 afi_safi_list.append({'AfiSafiName': 'l2vpn-evpn'})
 
-            n = {'NeighborAddress': info['neigh_addr'].split('/')[0],
-                 'PeerAs': peer.asn,
-                 'AuthPassword': info['passwd'],
-                 'PeerType': peer_type,
-                 'AfiSafiList': afi_safi_list}
+            n = {'NeighborConfig':
+                    {'NeighborAddress': info['neigh_addr'].split('/')[0],
+                     'PeerAs': peer.asn,
+                     'AuthPassword': info['passwd'],
+                     'PeerType': peer_type,
+                     'AfiSafiList': afi_safi_list}
+                }
 
             if info['passive']:
                 n['TransportOptions'] = {'PassiveMode':True}
@@ -284,10 +286,10 @@ class GoPlaneContainer(BGPContainer):
             if info['is_rs_client']:
                 n['RouteServer'] = {'RouteServerClient': True}
 
-            if 'NeighborList' not in bgp_config:
-                bgp_config['NeighborList'] = []
+            if 'Neighbors' not in bgp_config:
+                bgp_config['Neighbors'] = {'NeighborList': []}
 
-            bgp_config['NeighborList'].append(n)
+            bgp_config['Neighbors']['NeighborList'].append(n)
 
         dplane_config = {'Type': 'netlink', 'VirtualNetworkList': []}
         for info in self.vns:

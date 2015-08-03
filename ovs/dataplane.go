@@ -64,7 +64,7 @@ func (d *Dataplane) advPath(p *api.Path) error {
 }
 
 func (d *Dataplane) modRib(p *api.Path) error {
-	addOvsFlows(p.Nlri.EvpnNlri, p.Nexthop, d.config.Bgp.Global.RouterId)
+	addOvsFlows(p.Nlri.EvpnNlri, p.Nexthop, d.config.Bgp.Global.GlobalConfig.RouterId)
 	return nil
 }
 
@@ -112,7 +112,7 @@ func (d *Dataplane) Serve() error {
 	}
 	d.client = api.NewGrpcClient(conn)
 
-	routerId := d.config.Bgp.Global.RouterId.String()
+	routerId := d.config.Bgp.Global.GlobalConfig.RouterId.String()
 
 	d.advPathCh <- &api.Path{
 		Nlri: &api.Nlri{
