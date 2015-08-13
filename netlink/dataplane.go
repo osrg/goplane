@@ -19,6 +19,7 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/osrg/gobgp/api"
+	"github.com/osrg/gobgp/packet"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/net/context"
@@ -66,16 +67,51 @@ func (d *Dataplane) advPath(p *api.Path) error {
 }
 
 func (d *Dataplane) modRib(p *api.Path) error {
-	if p.Nexthop == "0.0.0.0" {
+	var nlri bgp.AddrPrefixInterface
+	var nexthop net.IP
+
+	if len(p.Nlri) > 0 {
+		nlri = &bgp.NLRInfo{}
+		err := nlri.DecodeFromBytes(p.Nlri)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, attr := range p.Pattrs {
+		p, err := bgp.GetPathAttribute(attr)
+		if err != nil {
+			return err
+		}
+
+		err = p.DecodeFromBytes(attr)
+		if err != nil {
+			return err
+		}
+
+		switch p.GetType() {
+		case bgp.BGP_ATTR_TYPE_NEXT_HOP:
+			n := p.(*bgp.PathAttributeNextHop)
+			nexthop = n.Value
+		case bgp.BGP_ATTR_TYPE_MP_REACH_NLRI:
+			mpreach := p.(*bgp.PathAttributeMpReachNLRI)
+			if len(mpreach.Value) != 1 {
+				return fmt.Errorf("include only one route in mp_reach_nlri")
+			}
+			nlri = mpreach.Value[0]
+			nexthop = mpreach.Nexthop
+		}
+	}
+
+	if nexthop.String() == "0.0.0.0" {
 		return nil
 	}
 
-	via := net.ParseIP(p.Nexthop)
-	routes, _ := netlink.RouteGet(via)
+	routes, _ := netlink.RouteGet(nexthop)
 	if len(routes) == 0 {
-		return fmt.Errorf("no route to nexthop: %s", p.Nexthop)
+		return fmt.Errorf("no route to nexthop: %s", nexthop)
 	}
-	net, _ := netlink.ParseIPNet(p.Nlri.Prefix)
+	net, _ := netlink.ParseIPNet(nlri.String())
 	route := &netlink.Route{
 		LinkIndex: routes[0].LinkIndex,
 		Dst:       net,
@@ -96,7 +132,7 @@ func (d *Dataplane) monitorBest() error {
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
-		Af:       api.AF_IPV4_UC,
+		Rf:       uint32(bgp.RF_IPv4_UC),
 	}
 	err = func() error {
 		stream, err := client.GetRib(context.Background(), arg)
@@ -110,7 +146,12 @@ func (d *Dataplane) monitorBest() error {
 			} else if err != nil {
 				return err
 			}
-			d.modRibCh <- dst.Paths[dst.BestPathIdx]
+			for _, p := range dst.Paths {
+				if p.Best {
+					d.modRibCh <- p
+					break
+				}
+			}
 		}
 		return nil
 	}()
@@ -125,16 +166,14 @@ func (d *Dataplane) monitorBest() error {
 	}
 
 	for {
-		p, err := stream.Recv()
+		dst, err := stream.Recv()
 		if err == io.EOF {
 			break
 		} else if err != nil {
 			return err
 		}
 
-		if p.Nlri.Af.Equal(api.AF_IPV4_UC) || p.Nlri.Af.Equal(api.AF_IPV6_UC) {
-			d.modRibCh <- p
-		}
+		d.modRibCh <- dst.Paths[0]
 	}
 	return nil
 }
@@ -180,13 +219,16 @@ func (d *Dataplane) Serve() error {
 		}
 	}
 
-	d.advPathCh <- &api.Path{
-		Nlri: &api.Nlri{
-			Af:     api.AF_IPV4_UC,
-			Prefix: routerId + "/32",
-		},
+	path := &api.Path{
+		Pattrs: make([][]byte, 0),
 	}
+	path.Nlri, _ = bgp.NewNLRInfo(uint8(32), routerId).Serialize()
+	n, _ := bgp.NewPathAttributeNextHop("0.0.0.0").Serialize()
+	path.Pattrs = append(path.Pattrs, n)
+	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
+	path.Pattrs = append(path.Pattrs, origin)
 
+	d.advPathCh <- path
 	d.t.Go(d.monitorBest)
 
 	for _, c := range d.config.Dataplane.VirtualNetworkList {

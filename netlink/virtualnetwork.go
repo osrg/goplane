@@ -20,6 +20,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/osrg/gobgp/api"
 	bgpconf "github.com/osrg/gobgp/config"
+	"github.com/osrg/gobgp/packet"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
@@ -43,34 +44,18 @@ type VirtualNetwork struct {
 	connMap     map[string]net.Conn
 	config      config.VirtualNetwork
 	global      bgpconf.Global
-	multicastCh chan *api.Path
-	macadvCh    chan *api.Path
+	multicastCh chan *Path
+	macadvCh    chan *Path
 	floodCh     chan []byte
-	pending     []*api.Path
 	netlinkCh   chan *netlinkEvent
 	client      api.GrpcClient
 }
 
-func (n *VirtualNetwork) getPaths(client api.GrpcClient, af *api.AddressFamily) ([]*api.Path, error) {
-	arg := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Af:       af,
-	}
-	stream, err := client.GetRib(context.Background(), arg)
-	if err != nil {
-		return nil, err
-	}
-	paths := make([]*api.Path, 0)
-	for {
-		d, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return nil, err
-		}
-		paths = append(paths, d.Paths[d.BestPathIdx])
-	}
-	return paths, nil
+type Path struct {
+	Nlri       bgp.AddrPrefixInterface
+	Nexthop    net.IP
+	Pattrs     []bgp.PathAttributeInterface
+	IsWithdraw bool
 }
 
 func (n *VirtualNetwork) Serve() error {
@@ -94,7 +79,6 @@ func (n *VirtualNetwork) Serve() error {
 	}
 
 	if master > 0 {
-
 		b, _ := netlink.LinkByIndex(master)
 		br := b.(*netlink.Bridge)
 		err = netlink.LinkSetDown(br)
@@ -189,6 +173,30 @@ func (n *VirtualNetwork) Serve() error {
 	defer conn.Close()
 	n.client = api.NewGrpcClient(conn)
 
+	rd, err := bgp.ParseRouteDistinguisher(n.config.RD)
+	if err != nil {
+		log.Fatal(err)
+	}
+	rdbuf, _ := rd.Serialize()
+	rt, err := bgp.ParseRouteTarget(n.config.RD)
+	if err != nil {
+		log.Fatal(err)
+	}
+	rtbuf, _ := rt.Serialize()
+	arg := &api.ModVrfArguments{
+		Operation: api.Operation_ADD,
+		Vrf: &api.Vrf{
+			Name:     n.config.RD,
+			Rd:       rdbuf,
+			ImportRt: [][]byte{rtbuf},
+			ExportRt: [][]byte{rtbuf},
+		},
+	}
+	_, err = n.client.ModVrf(context.Background(), arg)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	n.sendMulticast()
 
 	n.t.Go(n.monitorBest)
@@ -211,21 +219,22 @@ func (n *VirtualNetwork) Serve() error {
 		case <-n.t.Dying():
 			log.Error("dying!!")
 			return nil
-		case e := <-n.multicastCh:
-			if e.Nlri.EvpnNlri.MulticastEtag.Etag != n.config.Etag {
+		case p := <-n.multicastCh:
+			e := p.Nlri.(*bgp.EVPNNLRI).RouteTypeData.(*bgp.EVPNMulticastEthernetTagRoute)
+			if e.ETag != n.config.Etag || p.Nexthop.String() == "0.0.0.0" {
 				continue
 			}
-			err = n.modConnMap(e)
-
+			err = n.modConnMap(p)
 			if err != nil {
 				log.Errorf("mod conn failed. kill main loop. err: %s", err)
 				return err
 			}
-		case v := <-n.macadvCh:
-			if v.Nlri.EvpnNlri.MacIpAdv.Etag != n.config.Etag {
+		case p := <-n.macadvCh:
+			e := p.Nlri.(*bgp.EVPNNLRI).RouteTypeData.(*bgp.EVPNMacIPAdvertisementRoute)
+			if e.ETag != n.config.Etag || p.Nexthop.String() == "0.0.0.0" {
 				continue
 			}
-			err = n.modFdb(v)
+			err = n.modFdb(p)
 			if err != nil {
 				log.Errorf("mod fdb failed. kill main loop. err: %s", err)
 				return err
@@ -246,16 +255,11 @@ func (n *VirtualNetwork) Serve() error {
 	}
 }
 
-func (f *VirtualNetwork) modConnMap(path *api.Path) error {
-	addr := path.Nexthop
-	etag := path.Nlri.EvpnNlri.MulticastEtag.Etag
-
-	if path.Nexthop == "0.0.0.0" {
-		return nil
-	}
-
-	log.Debugf("mod cannection map: nh %s, vtep addr %s etag %d withdraw %t", path.Nexthop, path.Nlri.Prefix, etag, path.IsWithdraw)
-
+func (f *VirtualNetwork) modConnMap(path *Path) error {
+	addr := path.Nexthop.String()
+	e := path.Nlri.(*bgp.EVPNNLRI).RouteTypeData.(*bgp.EVPNMulticastEthernetTagRoute)
+	etag := e.ETag
+	log.Debugf("mod cannection map: nh %s, vtep addr %s etag %d withdraw %t", addr, path.Nlri, etag, path.IsWithdraw)
 	if path.IsWithdraw {
 		_, ok := f.connMap[addr]
 		if !ok {
@@ -263,7 +267,6 @@ func (f *VirtualNetwork) modConnMap(path *api.Path) error {
 		}
 
 		f.connMap[addr].Close()
-
 		delete(f.connMap, addr)
 	} else {
 		_, ok := f.connMap[addr]
@@ -292,27 +295,15 @@ func (f *VirtualNetwork) modConnMap(path *api.Path) error {
 	return nil
 }
 
-func (f *VirtualNetwork) modFdb(path *api.Path) error {
-
-	if path.Nexthop == "0.0.0.0" {
-		return nil
-	}
-
+func (f *VirtualNetwork) modFdb(path *Path) error {
 	log.WithFields(log.Fields{
 		"Topic": "VirtualNetwork",
 		"Etag":  f.config.Etag,
-	}).Debugf("modFdb new path, prefix: %s, nexthop: %s, withdraw: %t", path.Nlri.Prefix, path.Nexthop, path.IsWithdraw)
+	}).Debugf("modFdb new path, prefix: %s, nexthop: %s, withdraw: %t", path.Nlri, path.Nexthop, path.IsWithdraw)
 
-	var mac net.HardwareAddr
-	var ip net.IP
-
-	switch path.Nlri.EvpnNlri.Type {
-	case api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
-		mac, _ = net.ParseMAC(path.Nlri.EvpnNlri.MacIpAdv.MacAddr)
-		ip = net.ParseIP(path.Nexthop)
-	default:
-		return fmt.Errorf("invalid evpn nlri type: %s", path.Nlri.EvpnNlri.Type)
-	}
+	e := path.Nlri.(*bgp.EVPNNLRI).RouteTypeData.(*bgp.EVPNMacIPAdvertisementRoute)
+	mac := e.MacAddress
+	ip := path.Nexthop
 
 	link, err := netlink.LinkByName(f.config.VtepInterface)
 	if err != nil {
@@ -374,29 +365,35 @@ func (f *VirtualNetwork) flood(pkt []byte) error {
 
 func (n *VirtualNetwork) sendMulticast() error {
 	path := &api.Path{
-		Nlri: &api.Nlri{
-			Af: api.AF_EVPN,
-			EvpnNlri: &api.EVPNNlri{
-				Type: api.EVPN_TYPE_INCLUSIVE_MULTICAST_ETHERNET_TAG,
-				MulticastEtag: &api.EvpnInclusiveMulticastEthernetTag{
-					Etag: n.config.Etag,
-				},
-			},
-		},
+		Pattrs: make([][]byte, 0),
 	}
 
-	attr := &api.PathAttr{
-		Type: api.BGP_ATTR_TYPE_PMSI_TUNNEL,
-		PmsiTunnel: &api.PmsiTunnel{
-			Type:  api.PMSI_TUNNEL_TYPE_INGRESS_REPL,
-			Label: n.config.VNI,
-		},
-	}
+	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
+	path.Pattrs = append(path.Pattrs, origin)
 
-	path.Attrs = append(path.Attrs, attr)
+	multicastEtag := &bgp.EVPNMulticastEthernetTagRoute{
+		IPAddressLength: uint8(32),
+		IPAddress:       n.global.GlobalConfig.RouterId,
+		ETag:            uint32(n.config.Etag),
+	}
+	nlri := bgp.NewEVPNNLRI(bgp.EVPN_INCLUSIVE_MULTICAST_ETHERNET_TAG, 0, multicastEtag)
+	nexthop := "0.0.0.0"
+	mpreach, _ := bgp.NewPathAttributeMpReachNLRI(nexthop, []bgp.AddrPrefixInterface{nlri}).Serialize()
+	path.Pattrs = append(path.Pattrs, mpreach)
+
+	//	pmsi := &bgp.PathAttributePmsiTunnel{
+	//		TunnelType: bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL,
+	//		Label:      n.config.VNI,
+	//		TunnelID: &bgp.IngressReplTunnelID{
+	//			Value: n.global.GlobalConfig.RouterId,
+	//		},
+	//	}
+	//	pmsibuf, _ := pmsi.Serialize()
+	//	path.Pattrs = append(path.Pattrs, pmsibuf)
 
 	arg := &api.ModPathArguments{
-		Resource: api.Resource_GLOBAL,
+		Resource: api.Resource_VRF,
+		Name:     n.config.RD,
 		Path:     path,
 	}
 
@@ -423,23 +420,31 @@ func (n *VirtualNetwork) sendMulticast() error {
 
 func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	path := &api.Path{
-		Nlri: &api.Nlri{
-			Af: api.AF_EVPN,
-			EvpnNlri: &api.EVPNNlri{
-				Type: api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT,
-				MacIpAdv: &api.EvpnMacIpAdvertisement{
-					MacAddr: n.mac.String(),
-					IpAddr:  "0.0.0.0",
-					Etag:    uint32(f.config.Etag),
-					Labels:  []uint32{f.config.VNI},
-				},
-			},
-		},
+		Pattrs:     make([][]byte, 0),
+		IsWithdraw: n.isWithdraw,
 	}
 
-	path.IsWithdraw = n.isWithdraw
+	macIpAdv := &bgp.EVPNMacIPAdvertisementRoute{
+		ESI: bgp.EthernetSegmentIdentifier{
+			Type: bgp.ESI_ARBITRARY,
+		},
+		MacAddressLength: 48,
+		MacAddress:       n.mac,
+		IPAddressLength:  0,
+		Labels:           []uint32{uint32(f.config.VNI)},
+		ETag:             uint32(f.config.Etag),
+	}
+	nlri := bgp.NewEVPNNLRI(bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT, 0, macIpAdv)
+	nexthop := "0.0.0.0"
+	mpreach, _ := bgp.NewPathAttributeMpReachNLRI(nexthop, []bgp.AddrPrefixInterface{nlri}).Serialize()
+	path.Pattrs = append(path.Pattrs, mpreach)
+
+	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
+	path.Pattrs = append(path.Pattrs, origin)
+
 	arg := &api.ModPathArguments{
-		Resource: api.Resource_GLOBAL,
+		Resource: api.Resource_VRF,
+		Name:     f.config.RD,
 		Path:     path,
 	}
 
@@ -465,7 +470,7 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 
 }
 
-func (f *VirtualNetwork) monitorBest() error {
+func (n *VirtualNetwork) monitorBest() error {
 
 	timeout := grpc.WithTimeout(time.Second)
 	conn, err := grpc.Dial("127.0.0.1:8080", timeout)
@@ -477,57 +482,90 @@ func (f *VirtualNetwork) monitorBest() error {
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
-		Af:       api.AF_EVPN,
+		Rf:       uint32(bgp.RF_EVPN),
 	}
-	err = func() error {
-		stream, err := client.GetRib(context.Background(), arg)
-		if err != nil {
-			return err
-		}
+	f := func(stream interface {
+		Recv() (*api.Destination, error)
+	}) error {
 		for {
-			d, err := stream.Recv()
+			dst, err := stream.Recv()
 			if err == io.EOF {
 				break
 			} else if err != nil {
 				return err
 			}
-			bestpath := d.Paths[d.BestPathIdx]
-			switch bestpath.Nlri.EvpnNlri.Type {
-			case api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
-				f.macadvCh <- bestpath
-			case api.EVPN_TYPE_INCLUSIVE_MULTICAST_ETHERNET_TAG:
-				f.multicastCh <- bestpath
+			var path *api.Path
+			for _, p := range dst.Paths {
+				if p.Best {
+					path = p
+					break
+				}
+			}
+			if path == nil {
+				path = dst.Paths[0]
+			}
+
+			var nlri bgp.AddrPrefixInterface
+			var nexthop net.IP
+			pattrs := make([]bgp.PathAttributeInterface, 0, len(path.Pattrs))
+			for _, attr := range path.Pattrs {
+				p, err := bgp.GetPathAttribute(attr)
+				if err != nil {
+					return err
+				}
+
+				err = p.DecodeFromBytes(attr)
+				if err != nil {
+					return err
+				}
+
+				switch p.GetType() {
+				case bgp.BGP_ATTR_TYPE_MP_REACH_NLRI:
+					mpreach := p.(*bgp.PathAttributeMpReachNLRI)
+					if len(mpreach.Value) != 1 {
+						return fmt.Errorf("include only one route in mp_reach_nlri")
+					}
+					nlri = mpreach.Value[0]
+					nexthop = mpreach.Nexthop
+				}
+				pattrs = append(pattrs, p)
+			}
+
+			if nlri == nil {
+				continue
+			}
+
+			p := &Path{
+				Nlri:       nlri,
+				Nexthop:    nexthop,
+				Pattrs:     pattrs,
+				IsWithdraw: path.IsWithdraw,
+			}
+
+			switch nlri.(*bgp.EVPNNLRI).RouteType {
+			case bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
+				n.macadvCh <- p
+			case bgp.EVPN_INCLUSIVE_MULTICAST_ETHERNET_TAG:
+				n.multicastCh <- p
 			}
 		}
 		return nil
-	}()
+	}
+
+	stream, err := client.GetRib(context.Background(), arg)
+	if err != nil {
+		return err
+	}
+	err = f(stream)
 	if err != nil {
 		return err
 	}
 
-	stream, err := client.MonitorBestChanged(context.Background(), arg)
+	stream, err = client.MonitorBestChanged(context.Background(), arg)
 	if err != nil {
 		return err
 	}
-
-	for {
-		d, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		if d.Nlri.Af.Equal(api.AF_EVPN) {
-			switch d.Nlri.EvpnNlri.Type {
-			case api.EVPN_TYPE_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
-				f.macadvCh <- d
-			case api.EVPN_TYPE_INCLUSIVE_MULTICAST_ETHERNET_TAG:
-				f.multicastCh <- d
-			}
-		}
-	}
-	return nil
+	return f(stream)
 }
 
 func (f *VirtualNetwork) sniffPkt(fd int) error {
@@ -598,8 +636,8 @@ func (f *VirtualNetwork) monitorNetlink() error {
 }
 
 func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global) *VirtualNetwork {
-	macadvCh := make(chan *api.Path, 16)
-	multicastCh := make(chan *api.Path, 16)
+	macadvCh := make(chan *Path, 16)
+	multicastCh := make(chan *Path, 16)
 	floodCh := make(chan []byte, 16)
 	netlinkCh := make(chan *netlinkEvent, 16)
 

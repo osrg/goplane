@@ -162,21 +162,23 @@ func main() {
 		case newConfig := <-configCh:
 			var added []bgpconf.Neighbor
 			var deleted []bgpconf.Neighbor
+			var updated []bgpconf.Neighbor
 
 			if bgpConfig == nil {
 				bgpServer.SetGlobalType(newConfig.Bgp.Global)
 				bgpConfig = &newConfig.Bgp
 				added = newConfig.Bgp.Neighbors.NeighborList
 				deleted = []bgpconf.Neighbor{}
+				updated = []bgpconf.Neighbor{}
 			} else {
-				bgpConfig, added, deleted = bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)
+				bgpConfig, added, deleted, updated = bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)
 			}
 
 			if policyConfig == nil {
 				policyConfig = &newConfig.Policy
 				bgpServer.SetPolicy(newConfig.Policy)
 			} else {
-				if res := bgpconf.CheckPolicyDifference(policyConfig, &newConfig.Policy); res {
+				if bgpconf.CheckPolicyDifference(policyConfig, &newConfig.Policy) {
 					log.Info("Policy config is updated")
 					bgpServer.UpdatePolicy(newConfig.Policy)
 				}
@@ -210,12 +212,16 @@ func main() {
 			}
 
 			for _, p := range added {
-				log.Infof("Peer %v is added", p.NeighborAddress)
+				log.Infof("Peer %v is added", p.NeighborConfig.NeighborAddress)
 				bgpServer.PeerAdd(p)
 			}
 			for _, p := range deleted {
-				log.Infof("Peer %v is deleted", p.NeighborAddress)
+				log.Infof("Peer %v is deleted", p.NeighborConfig.NeighborAddress)
 				bgpServer.PeerDelete(p)
+			}
+			for _, p := range updated {
+				log.Infof("Peer %v is updated", p.NeighborConfig.NeighborAddress)
+				bgpServer.PeerUpdate(p)
 			}
 		case sig := <-sigCh:
 			switch sig {

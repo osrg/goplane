@@ -16,17 +16,17 @@
 package ovs
 
 import (
-	"github.com/osrg/gobgp/api"
 	"fmt"
+	"github.com/osrg/gobgp/packet"
 	"net"
-	"strings"
-	"strconv"
 	"os/exec"
+	"strconv"
+	"strings"
 )
 
 const (
-	PushVniFlowTemplate = "priority=%d,in_port=%d,actions=mod_vlan_vid:%d,resubmit(,1)"
-	ArpResponderFlowTemplate = "table=1,priority=%d,dl_type=0x0806,dl_vlan=%d,nw_dst=%s,actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x%s->NXM_NX_ARP_SHA[],load:0x%s->NXM_OF_ARP_SPA[],strip_vlan,output:in_port"
+	PushVniFlowTemplate             = "priority=%d,in_port=%d,actions=mod_vlan_vid:%d,resubmit(,1)"
+	ArpResponderFlowTemplate        = "table=1,priority=%d,dl_type=0x0806,dl_vlan=%d,nw_dst=%s,actions=move:NXM_OF_ETH_SRC[]->NXM_OF_ETH_DST[],mod_dl_src:%s,load:0x2->NXM_OF_ARP_OP[],move:NXM_NX_ARP_SHA[]->NXM_NX_ARP_THA[],move:NXM_OF_ARP_SPA[]->NXM_OF_ARP_TPA[],load:0x%s->NXM_NX_ARP_SHA[],load:0x%s->NXM_OF_ARP_SPA[],strip_vlan,output:in_port"
 	RemotePortSelectionFlowTemplate = "table=1,priority=%d,dl_dst=%s,dl_vlan=%d,actions=output:%s"
 	LocalPortSelectionFlowTemplate  = "priority=%d,dl_dst=%s,dl_vlan=%d,actions=strip_vlan,output:%s"
 )
@@ -65,15 +65,20 @@ func getLocalPortNumber(portName string) int {
 	return ret
 }
 
-func addOvsVniPushFlow(n *api.EVPNNlri, nexthop string, myIp string) {
+func addOvsVniPushFlow(n *bgp.EVPNNLRI, nexthop string, myIp string) {
 	if nexthop != myIp && nexthop != "0.0.0.0" {
 		// Never add a vni push flow for a container running on other peers
 		return
 	}
+	if n.RouteType != bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT {
+		return
+	}
 
-	vni := n.MacIpAdv.Labels[0]
-	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
-	ip := net.ParseIP(n.MacIpAdv.IpAddr)
+	macIpAdv := n.RouteTypeData.(*bgp.EVPNMacIPAdvertisementRoute)
+
+	vni := macIpAdv.Labels[0]
+	mac := macIpAdv.MacAddress
+	ip := macIpAdv.IPAddress
 	fmt.Printf("Add a VniPush flow for the container %s (vlan: %d)\n", mac.String(), vni)
 
 	portName := createPortName(ip, vni)
@@ -88,15 +93,19 @@ func addOvsVniPushFlow(n *api.EVPNNlri, nexthop string, myIp string) {
 	}
 }
 
-func addOvsArpResponderFlow(n *api.EVPNNlri, nexthop string, myIp string) {
+func addOvsArpResponderFlow(n *bgp.EVPNNLRI, nexthop string, myIp string) {
 	if nexthop == myIp || nexthop == "0.0.0.0" {
 		// Never add an Arp responder flow for a container running on myself
 		return
 	}
+	if n.RouteType != bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT {
+		return
+	}
+	macIpAdv := n.RouteTypeData.(*bgp.EVPNMacIPAdvertisementRoute)
 
-	vni := n.MacIpAdv.Labels[0]
- 	ip := net.ParseIP(n.MacIpAdv.IpAddr)
- 	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
+	vni := macIpAdv.Labels[0]
+	mac := macIpAdv.MacAddress
+	ip := macIpAdv.IPAddress
 
 	fmt.Printf("Add an ArpResponder flow for the container %s on %s\n", ip.String(), nexthop)
 	flow := fmt.Sprintf(ArpResponderFlowTemplate, 100, vni, ip, mac, MacAddressToBytesStr(mac), Ipv4ToBytesStr(ip))
@@ -108,15 +117,20 @@ func addOvsArpResponderFlow(n *api.EVPNNlri, nexthop string, myIp string) {
 	}
 }
 
-
-func addOvsRemotePortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) {
+func addOvsRemotePortSelectionFlow(n *bgp.EVPNNLRI, nexthop string, myIp string) {
 	if nexthop == myIp || nexthop == "0.0.0.0" {
 		// Never add a remote port selection flow for a container running on myself
 		return
 	}
+	if n.RouteType != bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT {
+		return
+	}
+	macIpAdv := n.RouteTypeData.(*bgp.EVPNMacIPAdvertisementRoute)
 
-	vni := n.MacIpAdv.Labels[0]
- 	ip := net.ParseIP(n.MacIpAdv.IpAddr)
+	vni := macIpAdv.Labels[0]
+	mac := macIpAdv.MacAddress
+	ip := macIpAdv.IPAddress
+
 	fmt.Printf("Add a RemotePortSelection flow for the container %s (vlan: %d) on %s\n", ip.String(), vni, nexthop)
 
 	// retrieve the port number to send packets for the new container
@@ -132,7 +146,6 @@ func addOvsRemotePortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string)
 	port := strings.Trim(string(out), "\n")
 
 	// add a flow
- 	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
 	flow := fmt.Sprintf(RemotePortSelectionFlowTemplate, 50, mac, vni, port)
 
 	_, err = exec.Command("ovs-ofctl", "add-flow", "docker0-ovs", flow).Output()
@@ -142,15 +155,21 @@ func addOvsRemotePortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string)
 	}
 }
 
-func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) {
+func addOvsLocalPortSelectionFlow(n *bgp.EVPNNLRI, nexthop string, myIp string) {
 	if nexthop != myIp && nexthop != "0.0.0.0" {
 		// Never add a local port selection flow for a container running on other peers
 		return
 	}
 
-	vni := n.MacIpAdv.Labels[0]
- 	mac, _ := net.ParseMAC(n.MacIpAdv.MacAddr)
-	ip := net.ParseIP(n.MacIpAdv.IpAddr)
+	if n.RouteType != bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT {
+		return
+	}
+	macIpAdv := n.RouteTypeData.(*bgp.EVPNMacIPAdvertisementRoute)
+
+	vni := macIpAdv.Labels[0]
+	mac := macIpAdv.MacAddress
+	ip := macIpAdv.IPAddress
+
 	fmt.Printf("Add a LocalPortSelection flow for the container %s (vlan: %d)\n", mac.String(), vni)
 
 	portName := createPortName(ip, vni)
@@ -175,10 +194,10 @@ func addOvsLocalPortSelectionFlow(n *api.EVPNNlri, nexthop string, myIp string) 
 	}
 }
 
-func addOvsFlows(n *api.EVPNNlri, nexthop string, RouterId net.IP) {
+func addOvsFlows(n *bgp.EVPNNLRI, nexthop, routerId string) {
 	// TODO: select appropriate iface automatically
-	addOvsVniPushFlow(n, nexthop, RouterId.String())
-	addOvsArpResponderFlow(n, nexthop, RouterId.String())
-	addOvsRemotePortSelectionFlow(n, nexthop, RouterId.String())
-	addOvsLocalPortSelectionFlow(n, nexthop, RouterId.String())
+	addOvsVniPushFlow(n, nexthop, routerId)
+	addOvsArpResponderFlow(n, nexthop, routerId)
+	addOvsRemotePortSelectionFlow(n, nexthop, routerId)
+	addOvsLocalPortSelectionFlow(n, nexthop, routerId)
 }

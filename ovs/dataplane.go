@@ -19,6 +19,7 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/osrg/gobgp/api"
+	"github.com/osrg/gobgp/packet"
 	"github.com/osrg/goplane/config"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -63,8 +64,38 @@ func (d *Dataplane) advPath(p *api.Path) error {
 	return nil
 }
 
-func (d *Dataplane) modRib(p *api.Path) error {
-	addOvsFlows(p.Nlri.EvpnNlri, p.Nexthop, d.config.Bgp.Global.GlobalConfig.RouterId)
+func (d *Dataplane) modRib(path *api.Path) error {
+	var nlri bgp.AddrPrefixInterface
+	var nexthop string
+	for _, attr := range path.Pattrs {
+		p, err := bgp.GetPathAttribute(attr)
+		if err != nil {
+			return err
+		}
+
+		err = p.DecodeFromBytes(attr)
+		if err != nil {
+			return err
+		}
+
+		if p.GetType() == bgp.BGP_ATTR_TYPE_MP_REACH_NLRI {
+			mpreach := p.(*bgp.PathAttributeMpReachNLRI)
+			if len(mpreach.Value) != 1 {
+				return fmt.Errorf("include only one route in mp_reach_nlri")
+			}
+			nlri = mpreach.Value[0]
+			nexthop = mpreach.Nexthop.String()
+			break
+		}
+	}
+	if nlri == nil {
+		return fmt.Errorf("no nlri")
+	}
+	n, ok := nlri.(*bgp.EVPNNLRI)
+	if !ok {
+		return fmt.Errorf("no evpn nlri")
+	}
+	addOvsFlows(n, nexthop, d.config.Bgp.Global.GlobalConfig.RouterId.String())
 	return nil
 }
 
@@ -80,7 +111,7 @@ func (d *Dataplane) monitorBest() error {
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
-		Af:       api.AF_EVPN,
+		Rf:       uint32(bgp.RF_EVPN),
 	}
 
 	stream, err := client.MonitorBestChanged(context.Background(), arg)
@@ -89,16 +120,14 @@ func (d *Dataplane) monitorBest() error {
 	}
 
 	for {
-		p, err := stream.Recv()
+		dst, err := stream.Recv()
 		if err == io.EOF {
 			break
 		} else if err != nil {
 			return err
 		}
 
-		if p.Nlri.Af.Equal(api.AF_EVPN) {
-			d.modRibCh <- p
-		}
+		d.modRibCh <- dst.Paths[0]
 	}
 	return nil
 }
@@ -112,14 +141,18 @@ func (d *Dataplane) Serve() error {
 	}
 	d.client = api.NewGrpcClient(conn)
 
-	routerId := d.config.Bgp.Global.GlobalConfig.RouterId.String()
-
-	d.advPathCh <- &api.Path{
-		Nlri: &api.Nlri{
-			Af:     api.AF_IPV4_UC,
-			Prefix: routerId + "/32",
-		},
+	path := &api.Path{
+		Pattrs: make([][]byte, 0),
 	}
+
+	routerId := d.config.Bgp.Global.GlobalConfig.RouterId.String()
+	path.Nlri, _ = bgp.NewNLRInfo(uint8(32), routerId).Serialize()
+	n, _ := bgp.NewPathAttributeNextHop("0.0.0.0").Serialize()
+	path.Pattrs = append(path.Pattrs, n)
+	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
+	path.Pattrs = append(path.Pattrs, origin)
+
+	d.advPathCh <- path
 
 	d.t.Go(d.monitorBest)
 

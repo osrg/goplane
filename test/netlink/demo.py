@@ -43,7 +43,6 @@ def install_docker_and_tools():
     update_goplane()
 
 def update_goplane():
-    local("docker pull osrg/gobgp")
     local("cp Dockerfile ../../../")
     local("cd ../../../ && docker build --no-cache -t goplane . && rm Dockerfile")
 
@@ -277,7 +276,8 @@ class GoPlaneContainer(BGPContainer):
                      'PeerAs': peer.asn,
                      'AuthPassword': info['passwd'],
                      'PeerType': peer_type,
-                     'AfiSafiList': afi_safi_list}
+                    },
+                 'AfiSafis': {'AfiSafiList': afi_safi_list}
                 }
 
             if info['passive']:
@@ -293,7 +293,8 @@ class GoPlaneContainer(BGPContainer):
 
         dplane_config = {'Type': 'netlink', 'VirtualNetworkList': []}
         for info in self.vns:
-            dplane_config['VirtualNetworkList'].append({'VNI': info['vni'],
+            dplane_config['VirtualNetworkList'].append({'RD': '{0}:{1}'.format(self.asn, info['vni']),
+                                                        'VNI': info['vni'],
                                                         'VxlanPort': info['vxlan_port'],
                                                         'VtepInterface': info['vtep'],
                                                         'Etag': info['color'],

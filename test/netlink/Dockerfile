@@ -1,7 +1,7 @@
 # goplane (part of Ryu SDN Framework)
 #
 
-FROM osrg/gobgp
+FROM gobgp
 
 MAINTAINER ISHIDA Wataru <ishida.wataru@lab.ntt.co.jp>
 

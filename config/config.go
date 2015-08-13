@@ -18,6 +18,7 @@ package config
 import bgp "github.com/osrg/gobgp/config"
 
 type VirtualNetwork struct {
+	RD               string
 	VNI              uint32
 	VxlanPort        uint16
 	VtepInterface    string
