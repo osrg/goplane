@@ -36,6 +36,9 @@ type Dataplane struct {
 	client    api.GrpcClient
 	modRibCh  chan *api.Path
 	advPathCh chan *api.Path
+	vnMap     map[string]*VirtualNetwork
+	addVnCh   chan config.VirtualNetwork
+	delVnCh   chan config.VirtualNetwork
 }
 
 func (d *Dataplane) advPath(p *api.Path) error {
@@ -231,11 +234,6 @@ func (d *Dataplane) Serve() error {
 	d.advPathCh <- path
 	d.t.Go(d.monitorBest)
 
-	for _, c := range d.config.Dataplane.VirtualNetworkList {
-		vn := NewVirtualNetwork(c, d.config.Bgp.Global)
-		d.t.Go(vn.Serve)
-	}
-
 	for {
 		select {
 		case <-d.t.Dying():
@@ -251,16 +249,39 @@ func (d *Dataplane) Serve() error {
 			if err != nil {
 				log.Error("failed to adv path: ", err)
 			}
+		case v := <-d.addVnCh:
+			vn := NewVirtualNetwork(v, d.config.Bgp.Global)
+			d.vnMap[v.RD] = vn
+			d.t.Go(vn.Serve)
+		case v := <-d.delVnCh:
+			vn := d.vnMap[v.RD]
+			vn.Stop()
+			delete(d.vnMap, v.RD)
 		}
 	}
 }
 
-func NewDataplane(config *config.ConfigSet) *Dataplane {
+func (d *Dataplane) AddVirtualNetwork(c config.VirtualNetwork) error {
+	d.addVnCh <- c
+	return nil
+}
+
+func (d *Dataplane) DeleteVirtualNetwork(c config.VirtualNetwork) error {
+	d.delVnCh <- c
+	return nil
+}
+
+func NewDataplane(c *config.ConfigSet) *Dataplane {
 	modRibCh := make(chan *api.Path, 16)
 	advPathCh := make(chan *api.Path, 16)
+	addVnCh := make(chan config.VirtualNetwork)
+	delVnCh := make(chan config.VirtualNetwork)
 	return &Dataplane{
-		config:    config,
+		config:    c,
 		modRibCh:  modRibCh,
 		advPathCh: advPathCh,
+		addVnCh:   addVnCh,
+		delVnCh:   delVnCh,
+		vnMap:     make(map[string]*VirtualNetwork),
 	}
 }

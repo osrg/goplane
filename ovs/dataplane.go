@@ -175,6 +175,16 @@ func (d *Dataplane) Serve() error {
 	}
 }
 
+func (d *Dataplane) AddVirtualNetwork(config config.VirtualNetwork) error {
+	log.Warn("ovs dataplane doesn't support dynamic virtualnetwork addition")
+	return nil
+}
+
+func (d *Dataplane) DeleteVirtualNetwork(config config.VirtualNetwork) error {
+	log.Warn("ovs dataplane doesn't support dynamic virtualnetwork deletion")
+	return nil
+}
+
 func NewDataplane(config *config.ConfigSet) *Dataplane {
 	modRibCh := make(chan *api.Path, 16)
 	advPathCh := make(chan *api.Path, 16)

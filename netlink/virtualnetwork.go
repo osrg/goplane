@@ -58,6 +58,41 @@ type Path struct {
 	IsWithdraw bool
 }
 
+func (n *VirtualNetwork) Stop() {
+	n.t.Kill(fmt.Errorf("admin stop"))
+}
+
+func (n *VirtualNetwork) modVrf(withdraw bool) error {
+	rd, err := bgp.ParseRouteDistinguisher(n.config.RD)
+	if err != nil {
+		return err
+	}
+	rdbuf, _ := rd.Serialize()
+	rt, err := bgp.ParseRouteTarget(n.config.RD)
+	if err != nil {
+		return err
+	}
+	rtbuf, _ := rt.Serialize()
+	op := api.Operation_ADD
+	if withdraw {
+		op = api.Operation_DEL
+	}
+	arg := &api.ModVrfArguments{
+		Operation: op,
+		Vrf: &api.Vrf{
+			Name:     n.config.RD,
+			Rd:       rdbuf,
+			ImportRt: [][]byte{rtbuf},
+			ExportRt: [][]byte{rtbuf},
+		},
+	}
+	_, err = n.client.ModVrf(context.Background(), arg)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (n *VirtualNetwork) Serve() error {
 	log.Debugf("vtep intf: %s", n.config.VtepInterface)
 	link, err := netlink.LinkByName(n.config.VtepInterface)
@@ -173,33 +208,20 @@ func (n *VirtualNetwork) Serve() error {
 	defer conn.Close()
 	n.client = api.NewGrpcClient(conn)
 
-	rd, err := bgp.ParseRouteDistinguisher(n.config.RD)
-	if err != nil {
-		log.Fatal(err)
-	}
-	rdbuf, _ := rd.Serialize()
-	rt, err := bgp.ParseRouteTarget(n.config.RD)
-	if err != nil {
-		log.Fatal(err)
-	}
-	rtbuf, _ := rt.Serialize()
-	arg := &api.ModVrfArguments{
-		Operation: api.Operation_ADD,
-		Vrf: &api.Vrf{
-			Name:     n.config.RD,
-			Rd:       rdbuf,
-			ImportRt: [][]byte{rtbuf},
-			ExportRt: [][]byte{rtbuf},
-		},
-	}
-	_, err = n.client.ModVrf(context.Background(), arg)
+	withdraw := false
+	err = n.modVrf(withdraw)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	n.sendMulticast()
+	err = n.sendMulticast(withdraw)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	n.t.Go(n.monitorBest)
+	n.t.Go(n.monitorNetlink)
+
 	for _, member := range n.config.SniffInterfaces {
 		log.Debugf("start sniff %s", member)
 		_, fd, err := PFPacketBind(member)
@@ -212,12 +234,17 @@ func (n *VirtualNetwork) Serve() error {
 			return n.sniffPkt(fd)
 		})
 	}
-	n.t.Go(n.monitorNetlink)
 
 	for {
 		select {
 		case <-n.t.Dying():
-			log.Error("dying!!")
+			log.Errorf("stop virtualnetwork %s", n.config.RD)
+			for h, conn := range n.connMap {
+				log.Debugf("close udp connection to %s", h)
+				conn.Close()
+			}
+			withdraw = true
+			n.modVrf(withdraw)
 			return nil
 		case p := <-n.multicastCh:
 			e := p.Nlri.(*bgp.EVPNNLRI).RouteTypeData.(*bgp.EVPNMulticastEthernetTagRoute)
@@ -363,9 +390,10 @@ func (f *VirtualNetwork) flood(pkt []byte) error {
 	return nil
 }
 
-func (n *VirtualNetwork) sendMulticast() error {
+func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	path := &api.Path{
-		Pattrs: make([][]byte, 0),
+		Pattrs:     make([][]byte, 0),
+		IsWithdraw: withdraw,
 	}
 
 	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
@@ -611,9 +639,8 @@ func (f *VirtualNetwork) monitorNetlink() error {
 
 		for _, msg := range msgs {
 			t := RTM_TYPE(msg.Header.Type)
-			//			log.Debugf("Len: %d, Type: %s, Flags: %d, Seq: %d, Pid: %d", msg.Header.Len, t, msg.Header.Flags, msg.Header.Seq, msg.Header.Pid)
 			switch t {
-			case RTM_NEWNEIGH, RTM_DELNEIGH, RTM_GETNEIGH:
+			case RTM_NEWNEIGH, RTM_DELNEIGH:
 				n, _ := netlink.NeighDeserialize(msg.Data)
 				for _, idx := range idxs {
 					if n.LinkIndex == idx {
@@ -621,13 +648,12 @@ func (f *VirtualNetwork) monitorNetlink() error {
 							"Topic": "VirtualNetwork",
 							"Etag":  f.config.Etag,
 						}).Debugf("mac: %s, ip: %s, index: %d, family: %s, state: %s, type: %s, flags: %s", n.HardwareAddr, n.IP, n.LinkIndex, NDA_TYPE(n.Family), NUD_TYPE(n.State), RTM_TYPE(n.Type), NTF_TYPE(n.Flags))
-						log.Debugf("from monitored interface")
-						// if we already have, proxy arp
-						// how to write back to interfaces ?
-						// write to bridge does work?
-						// do experiments
-						// get vxlan bridge
-						f.netlinkCh <- &netlinkEvent{n.HardwareAddr, n.IP, false}
+						var withdraw bool
+						if t == RTM_DELNEIGH {
+							withdraw = true
+						}
+						f.netlinkCh <- &netlinkEvent{n.HardwareAddr, n.IP, withdraw}
+						break
 					}
 				}
 			}

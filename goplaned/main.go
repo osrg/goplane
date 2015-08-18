@@ -36,6 +36,8 @@ import (
 
 type Dataplaner interface {
 	Serve() error
+	AddVirtualNetwork(config.VirtualNetwork) error
+	DeleteVirtualNetwork(config.VirtualNetwork) error
 }
 
 func main() {
@@ -154,24 +156,32 @@ func main() {
 	go grpcServer.Serve()
 
 	var dataplane Dataplaner
-	var bgpConfig *bgpconf.Bgp = nil
-	var policyConfig *bgpconf.RoutingPolicy = nil
+	var bgpConfig *bgpconf.Bgp
+	var policyConfig *bgpconf.RoutingPolicy
+	var dataplaneConfig *config.Dataplane
 
 	for {
 		select {
 		case newConfig := <-configCh:
-			var added []bgpconf.Neighbor
-			var deleted []bgpconf.Neighbor
-			var updated []bgpconf.Neighbor
 
 			if bgpConfig == nil {
 				bgpServer.SetGlobalType(newConfig.Bgp.Global)
-				bgpConfig = &newConfig.Bgp
-				added = newConfig.Bgp.Neighbors.NeighborList
-				deleted = []bgpconf.Neighbor{}
-				updated = []bgpconf.Neighbor{}
-			} else {
-				bgpConfig, added, deleted, updated = bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)
+			}
+
+			c, added, deleted, updated := bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)
+			bgpConfig = c
+
+			for _, p := range added {
+				log.Infof("Peer %v is added", p.NeighborConfig.NeighborAddress)
+				bgpServer.PeerAdd(p)
+			}
+			for _, p := range deleted {
+				log.Infof("Peer %v is deleted", p.NeighborConfig.NeighborAddress)
+				bgpServer.PeerDelete(p)
+			}
+			for _, p := range updated {
+				log.Infof("Peer %v is updated", p.NeighborConfig.NeighborAddress)
+				bgpServer.PeerUpdate(p)
 			}
 
 			if policyConfig == nil {
@@ -207,22 +217,20 @@ func main() {
 				default:
 					log.Errorf("Invalid dataplane type(%s). dataplane engine can't be started", newConfig.Dataplane.Type)
 				}
-			} else {
-				log.Debug("Dataplane config update is not supported yet")
 			}
 
-			for _, p := range added {
-				log.Infof("Peer %v is added", p.NeighborConfig.NeighborAddress)
-				bgpServer.PeerAdd(p)
+			as, ds := config.UpdateConfig(dataplaneConfig, newConfig.Dataplane)
+			dataplaneConfig = &newConfig.Dataplane
+
+			for _, v := range as {
+				log.Infof("VirtualNetwork %s is added", v.RD)
+				dataplane.AddVirtualNetwork(v)
 			}
-			for _, p := range deleted {
-				log.Infof("Peer %v is deleted", p.NeighborConfig.NeighborAddress)
-				bgpServer.PeerDelete(p)
+			for _, v := range ds {
+				log.Infof("VirtualNetwork %s is deleted", v.RD)
+				dataplane.DeleteVirtualNetwork(v)
 			}
-			for _, p := range updated {
-				log.Infof("Peer %v is updated", p.NeighborConfig.NeighborAddress)
-				bgpServer.PeerUpdate(p)
-			}
+
 		case sig := <-sigCh:
 			switch sig {
 			case syscall.SIGHUP:
