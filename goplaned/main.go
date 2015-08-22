@@ -148,7 +148,7 @@ func main() {
 	reloadCh := make(chan bool)
 	go config.ReadConfigfileServe(opts.ConfigFile, configCh, reloadCh)
 	reloadCh <- true
-	bgpServer := bgpserver.NewBgpServer(bgp.BGP_PORT, "")
+	bgpServer := bgpserver.NewBgpServer(bgp.BGP_PORT)
 	go bgpServer.Serve()
 
 	// start grpc Server
