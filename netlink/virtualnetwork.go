@@ -536,9 +536,17 @@ func (n *VirtualNetwork) monitorBest() error {
 				path = dst.Paths[0]
 			}
 
-			var nlri bgp.AddrPrefixInterface
 			var nexthop net.IP
 			pattrs := make([]bgp.PathAttributeInterface, 0, len(path.Pattrs))
+			afi, safi := bgp.RouteFamilyToAfiSafi(bgp.RouteFamily(path.Rf))
+			nlri, err := bgp.NewPrefixFromRouteFamily(afi, safi)
+			if err != nil {
+				return err
+			}
+			err = nlri.DecodeFromBytes(path.Nlri)
+			if err != nil {
+				return err
+			}
 			for _, attr := range path.Pattrs {
 				p, err := bgp.GetPathAttribute(attr)
 				if err != nil {
@@ -556,14 +564,9 @@ func (n *VirtualNetwork) monitorBest() error {
 					if len(mpreach.Value) != 1 {
 						return fmt.Errorf("include only one route in mp_reach_nlri")
 					}
-					nlri = mpreach.Value[0]
 					nexthop = mpreach.Nexthop
 				}
 				pattrs = append(pattrs, p)
-			}
-
-			if nlri == nil {
-				continue
 			}
 
 			p := &Path{
@@ -571,6 +574,11 @@ func (n *VirtualNetwork) monitorBest() error {
 				Nexthop:    nexthop,
 				Pattrs:     pattrs,
 				IsWithdraw: path.IsWithdraw,
+			}
+
+			_, ok := nlri.(*bgp.EVPNNLRI)
+			if !ok {
+				continue
 			}
 
 			switch nlri.(*bgp.EVPNNLRI).RouteType {
