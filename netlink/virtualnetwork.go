@@ -466,6 +466,13 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
 	path.Pattrs = append(path.Pattrs, origin)
 
+	isTransitive := true
+	o := bgp.NewOpaqueExtended(isTransitive)
+	o.SubType = bgp.EC_SUBTYPE_ENCAPSULATION
+	o.Value = &bgp.EncapExtended{bgp.TUNNEL_TYPE_VXLAN}
+	e, _ := bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{o}).Serialize()
+	path.Pattrs = append(path.Pattrs, e)
+
 	arg := &api.ModPathArguments{
 		Resource: api.Resource_VRF,
 		Name:     f.config.RD,
