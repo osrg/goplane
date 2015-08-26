@@ -409,15 +409,11 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	mpreach, _ := bgp.NewPathAttributeMpReachNLRI(nexthop, []bgp.AddrPrefixInterface{nlri}).Serialize()
 	path.Pattrs = append(path.Pattrs, mpreach)
 
-	//	pmsi := &bgp.PathAttributePmsiTunnel{
-	//		TunnelType: bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL,
-	//		Label:      n.config.VNI,
-	//		TunnelID: &bgp.IngressReplTunnelID{
-	//			Value: n.global.GlobalConfig.RouterId,
-	//		},
-	//	}
-	//	pmsibuf, _ := pmsi.Serialize()
-	//	path.Pattrs = append(path.Pattrs, pmsibuf)
+	id := &bgp.IngressReplTunnelID{
+		Value: n.global.GlobalConfig.RouterId,
+	}
+	pmsi, _ := bgp.NewPathAttributePmsiTunnel(bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL, false, 0, id).Serialize()
+	path.Pattrs = append(path.Pattrs, pmsi)
 
 	arg := &api.ModPathArguments{
 		Resource: api.Resource_VRF,
