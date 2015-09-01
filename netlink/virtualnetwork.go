@@ -201,7 +201,7 @@ func (n *VirtualNetwork) Serve() error {
 	}
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout)
+	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 func (n *VirtualNetwork) monitorBest() error {
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout)
+	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}

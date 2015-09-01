@@ -102,7 +102,7 @@ func (d *Dataplane) modRib(path *api.Path) error {
 func (d *Dataplane) monitorBest() error {
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout)
+	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func (d *Dataplane) monitorBest() error {
 func (d *Dataplane) Serve() error {
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout)
+	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
