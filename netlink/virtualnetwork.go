@@ -418,7 +418,7 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	arg := &api.ModPathArguments{
 		Resource: api.Resource_VRF,
 		Name:     n.config.RD,
-		Path:     path,
+		Paths:    []*api.Path{path},
 	}
 
 	stream, err := n.client.ModPath(context.Background())
@@ -476,7 +476,7 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	arg := &api.ModPathArguments{
 		Resource: api.Resource_VRF,
 		Name:     f.config.RD,
-		Path:     path,
+		Paths:    []*api.Path{path},
 	}
 
 	stream, err := f.client.ModPath(context.Background())

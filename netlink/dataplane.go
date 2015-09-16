@@ -44,7 +44,7 @@ type Dataplane struct {
 func (d *Dataplane) advPath(p *api.Path) error {
 	arg := &api.ModPathArguments{
 		Resource: api.Resource_GLOBAL,
-		Path:     p,
+		Paths:    []*api.Path{p},
 	}
 
 	stream, err := d.client.ModPath(context.Background())
@@ -74,7 +74,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	var nexthop net.IP
 
 	if len(p.Nlri) > 0 {
-		nlri = &bgp.NLRInfo{}
+		nlri = &bgp.IPAddrPrefix{}
 		err := nlri.DecodeFromBytes(p.Nlri)
 		if err != nil {
 			return err
@@ -225,7 +225,7 @@ func (d *Dataplane) Serve() error {
 	path := &api.Path{
 		Pattrs: make([][]byte, 0),
 	}
-	path.Nlri, _ = bgp.NewNLRInfo(uint8(32), routerId).Serialize()
+	path.Nlri, _ = bgp.NewIPAddrPrefix(uint8(32), routerId).Serialize()
 	n, _ := bgp.NewPathAttributeNextHop("0.0.0.0").Serialize()
 	path.Pattrs = append(path.Pattrs, n)
 	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
