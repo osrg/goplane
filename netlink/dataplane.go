@@ -18,7 +18,7 @@ package netlink
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/osrg/gobgp/api"
+	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/packet"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
@@ -33,7 +33,7 @@ import (
 type Dataplane struct {
 	t         tomb.Tomb
 	config    *config.ConfigSet
-	client    api.GrpcClient
+	client    api.GobgpApiClient
 	modRibCh  chan *api.Path
 	advPathCh chan *api.Path
 	vnMap     map[string]*VirtualNetwork
@@ -131,7 +131,7 @@ func (d *Dataplane) monitorBest() error {
 		log.Fatal(err)
 	}
 	defer conn.Close()
-	client := api.NewGrpcClient(conn)
+	client := api.NewGobgpApiClient(conn)
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
@@ -188,7 +188,7 @@ func (d *Dataplane) Serve() error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	d.client = api.NewGrpcClient(conn)
+	d.client = api.NewGobgpApiClient(conn)
 
 	lo, err := netlink.LinkByName("lo")
 	if err != nil {

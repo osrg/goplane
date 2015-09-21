@@ -18,7 +18,7 @@ package netlink
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/osrg/gobgp/api"
+	api "github.com/osrg/gobgp/api"
 	bgpconf "github.com/osrg/gobgp/config"
 	"github.com/osrg/gobgp/packet"
 	"github.com/osrg/goplane/config"
@@ -48,7 +48,7 @@ type VirtualNetwork struct {
 	macadvCh    chan *Path
 	floodCh     chan []byte
 	netlinkCh   chan *netlinkEvent
-	client      api.GrpcClient
+	client      api.GobgpApiClient
 }
 
 type Path struct {
@@ -206,7 +206,7 @@ func (n *VirtualNetwork) Serve() error {
 		log.Fatal(err)
 	}
 	defer conn.Close()
-	n.client = api.NewGrpcClient(conn)
+	n.client = api.NewGobgpApiClient(conn)
 
 	withdraw := false
 	err = n.modVrf(withdraw)
@@ -509,7 +509,7 @@ func (n *VirtualNetwork) monitorBest() error {
 		log.Fatal(err)
 	}
 	defer conn.Close()
-	client := api.NewGrpcClient(conn)
+	client := api.NewGobgpApiClient(conn)
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,

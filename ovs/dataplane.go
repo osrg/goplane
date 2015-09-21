@@ -18,7 +18,7 @@ package ovs
 import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
-	"github.com/osrg/gobgp/api"
+	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/packet"
 	"github.com/osrg/goplane/config"
 	"golang.org/x/net/context"
@@ -31,7 +31,7 @@ import (
 type Dataplane struct {
 	t         tomb.Tomb
 	config    *config.ConfigSet
-	client    api.GrpcClient
+	client    api.GobgpApiClient
 	modRibCh  chan *api.Path
 	advPathCh chan *api.Path
 }
@@ -107,7 +107,7 @@ func (d *Dataplane) monitorBest() error {
 		log.Fatal(err)
 	}
 	defer conn.Close()
-	client := api.NewGrpcClient(conn)
+	client := api.NewGobgpApiClient(conn)
 
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
@@ -139,7 +139,7 @@ func (d *Dataplane) Serve() error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	d.client = api.NewGrpcClient(conn)
+	d.client = api.NewGobgpApiClient(conn)
 
 	path := &api.Path{
 		Pattrs: make([][]byte, 0),
