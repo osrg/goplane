@@ -166,6 +166,8 @@ func main() {
 
 			if bgpConfig == nil {
 				bgpServer.SetGlobalType(newConfig.Bgp.Global)
+				bgpServer.SetRpkiConfig(newConfig.Bgp.RpkiServers)
+				bgpServer.SetBmpConfig(newConfig.Bgp.BmpServers)
 			}
 
 			c, added, deleted, updated := bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)
