@@ -133,22 +133,16 @@ func (d *Dataplane) monitorBest() error {
 	defer conn.Close()
 	client := api.NewGobgpApiClient(conn)
 
-	arg := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Rf:       uint32(bgp.RF_IPv4_UC),
+	arg := &api.Table{
+ 		Type:       api.Resource_GLOBAL,
+		Family:     uint32(bgp.RF_IPv4_UC),
 	}
 	err = func() error {
-		stream, err := client.GetRib(context.Background(), arg)
+		rib, err := client.GetRib(context.Background(), arg)
 		if err != nil {
 			return err
 		}
-		for {
-			dst, err := stream.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
-			}
+		for _, dst := range rib.Destinations {
 			for _, p := range dst.Paths {
 				if p.Best {
 					d.modRibCh <- p
@@ -162,8 +156,11 @@ func (d *Dataplane) monitorBest() error {
 	if err != nil {
 		return err
 	}
-
-	stream, err := client.MonitorBestChanged(context.Background(), arg)
+	arg2 := &api.Arguments{
+		Resource: api.Resource_GLOBAL,
+		Rf:       uint32(bgp.RF_IPv4_UC),
+	}
+	stream, err := client.MonitorBestChanged(context.Background(), arg2)
 	if err != nil {
 		return err
 	}

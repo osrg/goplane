@@ -510,11 +510,6 @@ func (n *VirtualNetwork) monitorBest() error {
 	}
 	defer conn.Close()
 	client := api.NewGobgpApiClient(conn)
-
-	arg := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Rf:       uint32(bgp.RF_EVPN),
-	}
 	f := func(stream interface {
 		Recv() (*api.Destination, error)
 	}) error {
@@ -590,17 +585,11 @@ func (n *VirtualNetwork) monitorBest() error {
 		}
 		return nil
 	}
-
-	stream, err := client.GetRib(context.Background(), arg)
-	if err != nil {
-		return err
+	arg := &api.Arguments{
+		Resource: api.Resource_GLOBAL,
+		Rf:       uint32(bgp.RF_EVPN),
 	}
-	err = f(stream)
-	if err != nil {
-		return err
-	}
-
-	stream, err = client.MonitorBestChanged(context.Background(), arg)
+	stream, err := client.MonitorBestChanged(context.Background(), arg)
 	if err != nil {
 		return err
 	}
