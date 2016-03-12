@@ -16,7 +16,7 @@
 package config
 
 import (
-	"github.com/BurntSushi/toml"
+	"github.com/spf13/viper"
 	log "github.com/Sirupsen/logrus"
 	bgpconf "github.com/osrg/gobgp/config"
 )
@@ -27,25 +27,27 @@ type ConfigSet struct {
 	Dataplane Dataplane
 }
 
-func ReadConfigfileServe(path string, configCh chan ConfigSet, reloadCh chan bool) {
+func ReadConfigfileServe(path, format string, configCh chan ConfigSet, reloadCh chan bool) {
 	for {
 		<-reloadCh
 
 		c := Config{}
-		md, err := toml.DecodeFile(path, &c)
-		if err == nil {
-			err = bgpconf.SetDefaultConfigValues(md, &c.Bgp)
-		}
-		if err != nil {
-			log.Fatal("can't read config file ", path, ", ", err)
-		}
-
 		p := bgpconf.RoutingPolicy{}
-		md, err = toml.DecodeFile(path, &p)
+		v := viper.New()
+		v.SetConfigFile(path)
+		v.SetConfigType(format)
+		err := v.ReadInConfig()
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
 		}
-
+		err = v.Unmarshal(&c)
+		if err != nil {
+			log.Fatal("can't read config file ", path, ", ", err)
+		}
+		err = v.Unmarshal(&p)
+		if err != nil {
+			log.Fatal("can't read config file ", path, ", ", err)
+		}
 		config := ConfigSet{Bgp: c.Bgp, Policy: p, Dataplane: c.Dataplane}
 		configCh <- config
 	}

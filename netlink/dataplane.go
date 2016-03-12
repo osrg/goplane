@@ -42,12 +42,12 @@ type Dataplane struct {
 }
 
 func (d *Dataplane) advPath(p *api.Path) error {
-	arg := &api.ModPathArguments{
+	arg := &api.ModPathsArguments{
 		Resource: api.Resource_GLOBAL,
 		Paths:    []*api.Path{p},
 	}
 
-	stream, err := d.client.ModPath(context.Background())
+	stream, err := d.client.ModPaths(context.Background())
 	if err != nil {
 		return err
 	}
@@ -114,11 +114,11 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	if len(routes) == 0 {
 		return fmt.Errorf("no route to nexthop: %s", nexthop)
 	}
-	net, _ := netlink.ParseIPNet(nlri.String())
+	dst, _ := netlink.ParseIPNet(nlri.String())
 	route := &netlink.Route{
 		LinkIndex: routes[0].LinkIndex,
-		Dst:       net,
-		Src:       d.config.Bgp.Global.GlobalConfig.RouterId,
+		Dst:       dst,
+		Src:       net.IP(d.config.Bgp.Global.Config.RouterId),
 	}
 	return netlink.RouteAdd(route)
 }
@@ -126,7 +126,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 func (d *Dataplane) monitorBest() error {
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
+	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func (d *Dataplane) monitorBest() error {
 	}
 	arg2 := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
-		Rf:       uint32(bgp.RF_IPv4_UC),
+		Family:   uint32(bgp.RF_IPv4_UC),
 	}
 	stream, err := client.MonitorBestChanged(context.Background(), arg2)
 	if err != nil {
@@ -181,7 +181,7 @@ func (d *Dataplane) monitorBest() error {
 func (d *Dataplane) Serve() error {
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
+	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func (d *Dataplane) Serve() error {
 		return fmt.Errorf("failed to get addr list of lo")
 	}
 
-	routerId := d.config.Bgp.Global.GlobalConfig.RouterId.String()
+	routerId := d.config.Bgp.Global.Config.RouterId
 
 	addr, err := netlink.ParseAddr(routerId + "/32")
 	if err != nil {

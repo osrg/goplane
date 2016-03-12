@@ -166,7 +166,7 @@ func (n *VirtualNetwork) Serve() error {
 			Name: n.config.VtepInterface,
 		},
 		VxlanId: int(n.config.VNI),
-		SrcAddr: n.global.GlobalConfig.RouterId,
+		SrcAddr: net.IP(n.global.Config.RouterId),
 	}
 
 	log.Debugf("add %s", n.config.VtepInterface)
@@ -201,7 +201,7 @@ func (n *VirtualNetwork) Serve() error {
 	}
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
+	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -399,9 +399,11 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
 	path.Pattrs = append(path.Pattrs, origin)
 
+	var rd bgp.RouteDistinguisherInterface
 	multicastEtag := &bgp.EVPNMulticastEthernetTagRoute{
+		RD:              rd,
 		IPAddressLength: uint8(32),
-		IPAddress:       n.global.GlobalConfig.RouterId,
+		IPAddress:       net.ParseIP(n.global.Config.RouterId),
 		ETag:            uint32(n.config.Etag),
 	}
 	nlri := bgp.NewEVPNNLRI(bgp.EVPN_INCLUSIVE_MULTICAST_ETHERNET_TAG, 0, multicastEtag)
@@ -410,18 +412,18 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	path.Pattrs = append(path.Pattrs, mpreach)
 
 	id := &bgp.IngressReplTunnelID{
-		Value: n.global.GlobalConfig.RouterId,
+		Value: net.IP(n.global.Config.RouterId),
 	}
 	pmsi, _ := bgp.NewPathAttributePmsiTunnel(bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL, false, 0, id).Serialize()
 	path.Pattrs = append(path.Pattrs, pmsi)
 
-	arg := &api.ModPathArguments{
+	arg := &api.ModPathsArguments{
 		Resource: api.Resource_VRF,
 		Name:     n.config.RD,
 		Paths:    []*api.Path{path},
 	}
 
-	stream, err := n.client.ModPath(context.Background())
+	stream, err := n.client.ModPaths(context.Background())
 	if err != nil {
 		return err
 	}
@@ -473,13 +475,13 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	e, _ := bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{o}).Serialize()
 	path.Pattrs = append(path.Pattrs, e)
 
-	arg := &api.ModPathArguments{
+	arg := &api.ModPathsArguments{
 		Resource: api.Resource_VRF,
 		Name:     f.config.RD,
 		Paths:    []*api.Path{path},
 	}
 
-	stream, err := f.client.ModPath(context.Background())
+	stream, err := f.client.ModPaths(context.Background())
 	if err != nil {
 		return err
 	}
@@ -504,7 +506,7 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 func (n *VirtualNetwork) monitorBest() error {
 
 	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:8080", timeout, grpc.WithBlock(), grpc.WithInsecure())
+	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -533,7 +535,7 @@ func (n *VirtualNetwork) monitorBest() error {
 
 			var nexthop net.IP
 			pattrs := make([]bgp.PathAttributeInterface, 0, len(path.Pattrs))
-			afi, safi := bgp.RouteFamilyToAfiSafi(bgp.RouteFamily(path.Rf))
+			afi, safi := bgp.RouteFamilyToAfiSafi(bgp.RouteFamily(path.Family))
 			nlri, err := bgp.NewPrefixFromRouteFamily(afi, safi)
 			if err != nil {
 				return err
@@ -587,7 +589,7 @@ func (n *VirtualNetwork) monitorBest() error {
 	}
 	arg := &api.Arguments{
 		Resource: api.Resource_GLOBAL,
-		Rf:       uint32(bgp.RF_EVPN),
+		Family:   uint32(bgp.RF_EVPN),
 	}
 	stream, err := client.MonitorBestChanged(context.Background(), arg)
 	if err != nil {

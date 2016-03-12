@@ -20,11 +20,10 @@ import (
 	"github.com/Sirupsen/logrus/hooks/syslog"
 	"github.com/jessevdk/go-flags"
 	bgpconf "github.com/osrg/gobgp/config"
-	"github.com/osrg/gobgp/packet"
 	bgpserver "github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/osrg/goplane/netlink"
-	"github.com/osrg/goplane/ovs"
+//	"github.com/osrg/goplane/ovs"
 	"io/ioutil"
 	"log/syslog"
 	"os"
@@ -48,11 +47,13 @@ func main() {
 
 	var opts struct {
 		ConfigFile    string `short:"f" long:"config-file" description:"specifying a config file"`
+		ConfigType    string `short:"t" long:"config-type" description:"specifying config type (toml, yaml, json)" default:"toml"`
 		LogLevel      string `short:"l" long:"log-level" description:"specifying log level"`
 		LogPlain      bool   `short:"p" long:"log-plain" description:"use plain format for logging (json by default)"`
 		UseSyslog     string `short:"s" long:"syslog" description:"use syslogd"`
 		Facility      string `long:"syslog-facility" description:"specify syslog facility"`
 		DisableStdlog bool   `long:"disable-stdlog" description:"disable standard logging"`
+		GrpcPort      int    `long:"grpc-port" description:"grpc port" default:"50051"`
 	}
 	_, err := flags.Parse(&opts)
 	if err != nil {
@@ -146,13 +147,13 @@ func main() {
 
 	configCh := make(chan config.ConfigSet)
 	reloadCh := make(chan bool)
-	go config.ReadConfigfileServe(opts.ConfigFile, configCh, reloadCh)
+	go config.ReadConfigfileServe(opts.ConfigFile, opts.ConfigType, configCh, reloadCh)
 	reloadCh <- true
-	bgpServer := bgpserver.NewBgpServer(bgp.BGP_PORT)
+	bgpServer := bgpserver.NewBgpServer()
 	go bgpServer.Serve()
 
 	// start grpc Server
-	grpcServer := bgpserver.NewGrpcServer(bgpserver.GRPC_PORT, bgpServer.GrpcReqCh)
+	grpcServer := bgpserver.NewGrpcServer(opts.GrpcPort, bgpServer.GrpcReqCh)
 	go grpcServer.Serve()
 
 	var dataplane Dataplaner
@@ -174,21 +175,21 @@ func main() {
 			bgpConfig = c
 
 			for _, p := range added {
-				log.Infof("Peer %v is added", p.NeighborConfig.NeighborAddress)
+				log.Infof("Peer %v is added", p.Config.NeighborAddress)
 				bgpServer.PeerAdd(p)
 			}
 			for _, p := range deleted {
-				log.Infof("Peer %v is deleted", p.NeighborConfig.NeighborAddress)
+				log.Infof("Peer %v is deleted", p.Config.NeighborAddress)
 				bgpServer.PeerDelete(p)
 			}
 			for _, p := range updated {
-				log.Infof("Peer %v is updated", p.NeighborConfig.NeighborAddress)
+				log.Infof("Peer %v is updated", p.Config.NeighborAddress)
 				bgpServer.PeerUpdate(p)
 			}
 
 			if policyConfig == nil {
 				policyConfig = &newConfig.Policy
-				bgpServer.SetPolicy(newConfig.Policy)
+				bgpServer.SetRoutingPolicy(newConfig.Policy)
 			} else {
 				if bgpconf.CheckPolicyDifference(policyConfig, &newConfig.Policy) {
 					log.Info("Policy config is updated")
@@ -207,15 +208,15 @@ func main() {
 							log.Errorf("dataplane finished with err: %s", err)
 						}
 					}()
-				case "ovs":
-					log.Debug("new dataplane: ovs")
-					dataplane = ovs.NewDataplane(&newConfig)
-					go func() {
-						err := dataplane.Serve()
-						if err != nil {
-							log.Errorf("dataplane finished with err: %s", err)
-						}
-					}()
+//				case "ovs":
+//					log.Debug("new dataplane: ovs")
+//					dataplane = ovs.NewDataplane(&newConfig)
+//					go func() {
+//						err := dataplane.Serve()
+//						if err != nil {
+//							log.Errorf("dataplane finished with err: %s", err)
+//						}
+//					}()
 				default:
 					log.Errorf("Invalid dataplane type(%s). dataplane engine can't be started", newConfig.Dataplane.Type)
 				}
