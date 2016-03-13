@@ -262,14 +262,14 @@ class GoPlaneContainer(BGPContainer):
             afi_safi_list = []
             version = netaddr.IPNetwork(info['neigh_addr']).version
             if version == 4:
-                afi_safi_list.append({'afi-safi-name': 'ipv4-unicast', 'enabled': True})
+                afi_safi_list.append({'afi-safi-name': 'ipv4-unicast'})
             elif version == 6:
-                afi_safi_list.append({'afi-safi-name': 'ipv6-unicast', 'enabled': True})
+                afi_safi_list.append({'afi-safi-name': 'ipv6-unicast'})
             else:
                 Exception('invalid ip address version. {0}'.format(version))
 
             if info['evpn']:
-                afi_safi_list.append({'afi-safi-name': 'l2vpn-evpn', 'enabled': True})
+                afi_safi_list.append({'afi-safi-name': 'l2vpn-evpn'})
 
             n = {'config': {
                     'neighbor-address': info['neigh_addr'].split('/')[0],
@@ -286,22 +286,22 @@ class GoPlaneContainer(BGPContainer):
             if info['is_rs_client']:
                 n['route-server'] = {'config': {'route-server-client': True}}
 
-            if 'neighbors' not in bgp_config:
-                bgp_config['neighbors'] = []
+            if 'neighbors' not in config:
+                config['neighbors'] = []
 
-            bgp_config['neighbors'].append(n)
+            config['neighbors'].append(n)
 
-        dplane_config = {'Type': 'netlink', 'VirtualNetworkList': []}
+        dplane_config = {'type': 'netlink', 'virtual-network-list': []}
         for info in self.vns:
-            dplane_config['VirtualNetworkList'].append({'RD': '{0}:{1}'.format(self.asn, info['vni']),
-                                                        'VNI': info['vni'],
-                                                        'VxlanPort': info['vxlan_port'],
-                                                        'VtepInterface': info['vtep'],
-                                                        'Etag': info['color'],
-                                                        'SniffInterfaces': info['member'],
-                                                        'MemberInterfaces': info['member']})
+            dplane_config['virtual-network-list'].append({'rd': '{0}:{1}'.format(self.asn, info['vni']),
+                                                          'vni': info['vni'],
+                                                          'vxlan-port': info['vxlan_port'],
+                                                          'vtep-interface': info['vtep'],
+                                                          'etag': info['color'],
+                                                          'sniff-interfaces': info['member'],
+                                                          'member-interfaces': info['member']})
 
-        config = {'Bgp': bgp_config, 'Dataplane': dplane_config}
+        config['dataplane'] = dplane_config
 
         with open('{0}/goplaned.conf'.format(self.config_dir), 'w') as f:
             print colors.yellow(toml.dumps(config))

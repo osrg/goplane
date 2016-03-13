@@ -18,21 +18,25 @@ package config
 import bgp "github.com/osrg/gobgp/config"
 
 type VirtualNetwork struct {
-	RD               string
-	VNI              uint32
-	VxlanPort        uint16
-	VtepInterface    string
-	Etag             uint32
-	SniffInterfaces  []string
-	MemberInterfaces []string
+	RD               string   `mapstructure:"rd"`
+	VNI              uint32   `mapstructure:"vni"`
+	VxlanPort        uint16   `mapstructure:"vxlan-port"`
+	VtepInterface    string   `mapstructure:"vtep-interface"`
+	Etag             uint32   `mapstructure:"etag"`
+	SniffInterfaces  []string `mapstructure:"sniff-interfaces"`
+	MemberInterfaces []string `mapstructure:"member-interfaces"`
 }
 
 type Dataplane struct {
-	Type               string
-	VirtualNetworkList []VirtualNetwork
+	Type               string           `mapstructure:"type"`
+	VirtualNetworkList []VirtualNetwork `mapstructure:"virtual-network-list"`
 }
 
 type Config struct {
-	Bgp       bgp.Bgp
-	Dataplane Dataplane
+	Global            bgp.Global             `mapstructure:"global"`
+	Neighbors         []bgp.Neighbor         `mapstructure:"neighbors"`
+	RpkiServers       []bgp.RpkiServer       `mapstructure:"rpki-servers"`
+	DefinedSets       bgp.DefinedSets        `mapstructure:"defined-sets"`
+	PolicyDefinitions []bgp.PolicyDefinition `mapstructure:"policy-definitions"`
+	Dataplane         Dataplane              `mapstructure:"dataplane"`
 }

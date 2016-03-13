@@ -16,23 +16,14 @@
 package config
 
 import (
-	"github.com/spf13/viper"
 	log "github.com/Sirupsen/logrus"
-	bgpconf "github.com/osrg/gobgp/config"
+	"github.com/spf13/viper"
 )
 
-type ConfigSet struct {
-	Bgp       bgpconf.Bgp
-	Policy    bgpconf.RoutingPolicy
-	Dataplane Dataplane
-}
-
-func ReadConfigfileServe(path, format string, configCh chan ConfigSet, reloadCh chan bool) {
+func ReadConfigfileServe(path, format string, configCh chan Config, reloadCh chan bool) {
 	for {
 		<-reloadCh
-
 		c := Config{}
-		p := bgpconf.RoutingPolicy{}
 		v := viper.New()
 		v.SetConfigFile(path)
 		v.SetConfigType(format)
@@ -40,16 +31,11 @@ func ReadConfigfileServe(path, format string, configCh chan ConfigSet, reloadCh 
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
 		}
-		err = v.Unmarshal(&c)
+		err = v.UnmarshalExact(&c)
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
 		}
-		err = v.Unmarshal(&p)
-		if err != nil {
-			log.Fatal("can't read config file ", path, ", ", err)
-		}
-		config := ConfigSet{Bgp: c.Bgp, Policy: p, Dataplane: c.Dataplane}
-		configCh <- config
+		configCh <- c
 	}
 }
 

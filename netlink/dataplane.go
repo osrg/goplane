@@ -29,7 +29,7 @@ import (
 
 type Dataplane struct {
 	t         tomb.Tomb
-	config    *config.ConfigSet
+	config    *config.Config
 	modRibCh  chan *api.Path
 	advPathCh chan *api.Path
 	vnMap     map[string]*VirtualNetwork
@@ -102,7 +102,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	route := &netlink.Route{
 		LinkIndex: routes[0].LinkIndex,
 		Dst:       dst,
-		Src:       net.ParseIP(d.config.Bgp.Global.Config.RouterId),
+		Src:       net.ParseIP(d.config.Global.Config.RouterId),
 	}
 	return netlink.RouteAdd(route)
 }
@@ -168,7 +168,7 @@ func (d *Dataplane) Serve() error {
 		return fmt.Errorf("failed to get addr list of lo")
 	}
 
-	routerId := d.config.Bgp.Global.Config.RouterId
+	routerId := d.config.Global.Config.RouterId
 
 	addr, err := netlink.ParseAddr(routerId + "/32")
 	if err != nil {
@@ -218,7 +218,7 @@ func (d *Dataplane) Serve() error {
 				log.Error("failed to adv path: ", err)
 			}
 		case v := <-d.addVnCh:
-			vn := NewVirtualNetwork(v, d.config.Bgp.Global, d.apiCh)
+			vn := NewVirtualNetwork(v, d.config.Global, d.apiCh)
 			d.vnMap[v.RD] = vn
 			d.t.Go(vn.Serve)
 		case v := <-d.delVnCh:
@@ -239,7 +239,7 @@ func (d *Dataplane) DeleteVirtualNetwork(c config.VirtualNetwork) error {
 	return nil
 }
 
-func NewDataplane(c *config.ConfigSet, apiCh chan *server.GrpcRequest) *Dataplane {
+func NewDataplane(c *config.Config, apiCh chan *server.GrpcRequest) *Dataplane {
 	modRibCh := make(chan *api.Path, 16)
 	advPathCh := make(chan *api.Path, 16)
 	addVnCh := make(chan config.VirtualNetwork)

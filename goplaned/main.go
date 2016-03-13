@@ -145,7 +145,7 @@ func main() {
 		opts.ConfigFile = "goplaned.conf"
 	}
 
-	configCh := make(chan config.ConfigSet)
+	configCh := make(chan config.Config)
 	reloadCh := make(chan bool)
 	go config.ReadConfigfileServe(opts.ConfigFile, opts.ConfigType, configCh, reloadCh)
 	reloadCh <- true
@@ -164,23 +164,31 @@ func main() {
 	for {
 		select {
 		case newConfig := <-configCh:
-
+			pol := bgpconf.RoutingPolicy{
+				PolicyDefinitions: newConfig.PolicyDefinitions,
+				DefinedSets:       newConfig.DefinedSets,
+			}
+			bgp := bgpconf.Bgp{
+				Global:      newConfig.Global,
+				Neighbors:   newConfig.Neighbors,
+				RpkiServers: newConfig.RpkiServers,
+			}
 			if policyConfig == nil {
-				policyConfig = &newConfig.Policy
-				bgpServer.SetRoutingPolicy(newConfig.Policy)
+				policyConfig = &pol
+				bgpServer.SetRoutingPolicy(pol)
 			} else {
-				if bgpconf.CheckPolicyDifference(policyConfig, &newConfig.Policy) {
+				if bgpconf.CheckPolicyDifference(policyConfig, &pol) {
 					log.Info("Policy config is updated")
-					bgpServer.UpdatePolicy(newConfig.Policy)
+					bgpServer.UpdatePolicy(pol)
 				}
 			}
 
 			if bgpConfig == nil {
-				bgpServer.SetGlobalType(newConfig.Bgp.Global)
-				bgpServer.SetRpkiConfig(newConfig.Bgp.RpkiServers)
+				bgpServer.SetGlobalType(newConfig.Global)
+				bgpServer.SetRpkiConfig(newConfig.RpkiServers)
 			}
 
-			c, added, deleted, updated := bgpconf.UpdateConfig(bgpConfig, &newConfig.Bgp)
+			c, added, deleted, updated := bgpconf.UpdateConfig(bgpConfig, &bgp)
 			bgpConfig = c
 
 			for _, p := range added {
