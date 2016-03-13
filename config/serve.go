@@ -17,6 +17,7 @@ package config
 
 import (
 	log "github.com/Sirupsen/logrus"
+	bgp "github.com/osrg/gobgp/config"
 	"github.com/spf13/viper"
 )
 
@@ -35,6 +36,15 @@ func ReadConfigfileServe(path, format string, configCh chan Config, reloadCh cha
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
 		}
+		b := bgp.Bgp{
+			Global:      c.Global,
+			Neighbors:   c.Neighbors,
+			RpkiServers: c.RpkiServers,
+		}
+		err = bgp.SetDefaultConfigValues(v, &b)
+		c.Global = b.Global
+		c.Neighbors = b.Neighbors
+		c.RpkiServers = b.RpkiServers
 		configCh <- c
 	}
 }
