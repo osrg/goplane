@@ -21,16 +21,13 @@ import (
 	api "github.com/osrg/gobgp/api"
 	bgpconf "github.com/osrg/gobgp/config"
 	"github.com/osrg/gobgp/packet"
+	"github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 	"gopkg.in/tomb.v2"
-	"io"
 	"net"
 	"syscall"
-	"time"
 )
 
 type netlinkEvent struct {
@@ -48,7 +45,7 @@ type VirtualNetwork struct {
 	macadvCh    chan *Path
 	floodCh     chan []byte
 	netlinkCh   chan *netlinkEvent
-	client      api.GobgpApiClient
+	apiCh       chan *server.GrpcRequest
 }
 
 type Path struct {
@@ -77,6 +74,7 @@ func (n *VirtualNetwork) modVrf(withdraw bool) error {
 	if withdraw {
 		op = api.Operation_DEL
 	}
+	ch := make(chan *server.GrpcResponse)
 	arg := &api.ModVrfArguments{
 		Operation: op,
 		Vrf: &api.Vrf{
@@ -86,11 +84,12 @@ func (n *VirtualNetwork) modVrf(withdraw bool) error {
 			ExportRt: [][]byte{rtbuf},
 		},
 	}
-	_, err = n.client.ModVrf(context.Background(), arg)
-	if err != nil {
-		return err
+	n.apiCh <- &server.GrpcRequest{
+		RequestType: server.REQ_VRF_MOD,
+		Data:        arg,
+		ResponseCh:  ch,
 	}
-	return nil
+	return (<-ch).Err()
 }
 
 func (n *VirtualNetwork) Serve() error {
@@ -166,7 +165,7 @@ func (n *VirtualNetwork) Serve() error {
 			Name: n.config.VtepInterface,
 		},
 		VxlanId: int(n.config.VNI),
-		SrcAddr: net.IP(n.global.Config.RouterId),
+		SrcAddr: net.ParseIP(n.global.Config.RouterId),
 	}
 
 	log.Debugf("add %s", n.config.VtepInterface)
@@ -199,14 +198,6 @@ func (n *VirtualNetwork) Serve() error {
 			return fmt.Errorf("failed to set master %s dev %s", brName, member)
 		}
 	}
-
-	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-	n.client = api.NewGobgpApiClient(conn)
 
 	withdraw := false
 	err = n.modVrf(withdraw)
@@ -412,36 +403,24 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	path.Pattrs = append(path.Pattrs, mpreach)
 
 	id := &bgp.IngressReplTunnelID{
-		Value: net.IP(n.global.Config.RouterId),
+		Value: net.ParseIP(n.global.Config.RouterId),
 	}
 	pmsi, _ := bgp.NewPathAttributePmsiTunnel(bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL, false, 0, id).Serialize()
 	path.Pattrs = append(path.Pattrs, pmsi)
 
-	arg := &api.ModPathsArguments{
-		Resource: api.Resource_VRF,
-		Name:     n.config.RD,
-		Paths:    []*api.Path{path},
+	arg := &api.ModPathArguments{
+		Operation: api.Operation_ADD,
+		Resource:  api.Resource_VRF,
+		Name:      n.config.RD,
+		Path:      path,
 	}
-
-	stream, err := n.client.ModPaths(context.Background())
-	if err != nil {
-		return err
+	ch := make(chan *server.GrpcResponse)
+	n.apiCh <- &server.GrpcRequest{
+		RequestType: server.REQ_MOD_PATH,
+		Data:        arg,
+		ResponseCh:  ch,
 	}
-
-	err = stream.Send(arg)
-	if err != nil {
-		return err
-	}
-	stream.CloseSend()
-
-	res, err := stream.CloseAndRecv()
-	if err != nil {
-		return err
-	}
-	if res.Code != api.Error_SUCCESS {
-		return fmt.Errorf("error: code: %d, msg: %s\n", res.Code, res.Msg)
-	}
-	return nil
+	return (<-ch).Err()
 }
 
 func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
@@ -475,53 +454,29 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	e, _ := bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{o}).Serialize()
 	path.Pattrs = append(path.Pattrs, e)
 
-	arg := &api.ModPathsArguments{
-		Resource: api.Resource_VRF,
-		Name:     f.config.RD,
-		Paths:    []*api.Path{path},
+	arg := &api.ModPathArguments{
+		Operation: api.Operation_ADD,
+		Resource:  api.Resource_VRF,
+		Name:      f.config.RD,
+		Path:      path,
 	}
-
-	stream, err := f.client.ModPaths(context.Background())
-	if err != nil {
-		return err
+	ch := make(chan *server.GrpcResponse)
+	f.apiCh <- &server.GrpcRequest{
+		RequestType: server.REQ_MOD_PATH,
+		Data:        arg,
+		ResponseCh:  ch,
 	}
-
-	err = stream.Send(arg)
-	if err != nil {
-		return err
-	}
-	stream.CloseSend()
-
-	res, err := stream.CloseAndRecv()
-	if err != nil {
-		return err
-	}
-	if res.Code != api.Error_SUCCESS {
-		return fmt.Errorf("error: code: %d, msg: %s\n", res.Code, res.Msg)
-	}
-	return nil
-
+	return (<-ch).Err()
 }
 
 func (n *VirtualNetwork) monitorBest() error {
 
-	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-	client := api.NewGobgpApiClient(conn)
-	f := func(stream interface {
-		Recv() (*api.Destination, error)
-	}) error {
-		for {
-			dst, err := stream.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				return err
+	f := func(ch chan *server.GrpcResponse) error {
+		for res := range ch {
+			if res.Err() != nil {
+				return res.Err()
 			}
+			dst := res.Data.(*api.Destination)
 			var path *api.Path
 			for _, p := range dst.Paths {
 				if p.Best {
@@ -587,15 +542,13 @@ func (n *VirtualNetwork) monitorBest() error {
 		}
 		return nil
 	}
-	arg := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Family:   uint32(bgp.RF_EVPN),
+	ch := make(chan *server.GrpcResponse)
+	n.apiCh <- &server.GrpcRequest{
+		RequestType: server.REQ_MONITOR_GLOBAL_BEST_CHANGED,
+		RouteFamily: bgp.RF_EVPN,
+		ResponseCh:  ch,
 	}
-	stream, err := client.MonitorBestChanged(context.Background(), arg)
-	if err != nil {
-		return err
-	}
-	return f(stream)
+	return f(ch)
 }
 
 func (f *VirtualNetwork) sniffPkt(fd int) error {
@@ -663,7 +616,7 @@ func (f *VirtualNetwork) monitorNetlink() error {
 	}
 }
 
-func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global) *VirtualNetwork {
+func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global, apiCh chan *server.GrpcRequest) *VirtualNetwork {
 	macadvCh := make(chan *Path, 16)
 	multicastCh := make(chan *Path, 16)
 	floodCh := make(chan []byte, 16)
@@ -677,5 +630,6 @@ func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global) *Vir
 		multicastCh: multicastCh,
 		floodCh:     floodCh,
 		netlinkCh:   netlinkCh,
+		apiCh:       apiCh,
 	}
 }

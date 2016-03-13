@@ -165,6 +165,16 @@ func main() {
 		select {
 		case newConfig := <-configCh:
 
+			if policyConfig == nil {
+				policyConfig = &newConfig.Policy
+				bgpServer.SetRoutingPolicy(newConfig.Policy)
+			} else {
+				if bgpconf.CheckPolicyDifference(policyConfig, &newConfig.Policy) {
+					log.Info("Policy config is updated")
+					bgpServer.UpdatePolicy(newConfig.Policy)
+				}
+			}
+
 			if bgpConfig == nil {
 				bgpServer.SetGlobalType(newConfig.Bgp.Global)
 				bgpServer.SetRpkiConfig(newConfig.Bgp.RpkiServers)
@@ -186,21 +196,11 @@ func main() {
 				bgpServer.PeerUpdate(p)
 			}
 
-			if policyConfig == nil {
-				policyConfig = &newConfig.Policy
-				bgpServer.SetRoutingPolicy(newConfig.Policy)
-			} else {
-				if bgpconf.CheckPolicyDifference(policyConfig, &newConfig.Policy) {
-					log.Info("Policy config is updated")
-					bgpServer.UpdatePolicy(newConfig.Policy)
-				}
-			}
-
 			if dataplane == nil {
 				switch newConfig.Dataplane.Type {
 				case "netlink":
 					log.Debug("new dataplane: netlink")
-					dataplane = netlink.NewDataplane(&newConfig)
+					dataplane = netlink.NewDataplane(&newConfig, bgpServer.GrpcReqCh)
 					go func() {
 						err := dataplane.Serve()
 						if err != nil {

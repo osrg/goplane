@@ -274,6 +274,7 @@ class GoPlaneContainer(BGPContainer):
             n = {'config': {
                     'neighbor-address': info['neigh_addr'].split('/')[0],
                     'peer-as': peer.asn,
+                    'local-as': self.asn,
                     'auth-password': info['passwd'],
                  },
                  'afi-safis': afi_safi_list,

@@ -20,53 +20,37 @@ import (
 	log "github.com/Sirupsen/logrus"
 	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/packet"
+	"github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 	"gopkg.in/tomb.v2"
-	"io"
 	"net"
-	"time"
 )
 
 type Dataplane struct {
 	t         tomb.Tomb
 	config    *config.ConfigSet
-	client    api.GobgpApiClient
 	modRibCh  chan *api.Path
 	advPathCh chan *api.Path
 	vnMap     map[string]*VirtualNetwork
 	addVnCh   chan config.VirtualNetwork
 	delVnCh   chan config.VirtualNetwork
+	apiCh     chan *server.GrpcRequest
 }
 
 func (d *Dataplane) advPath(p *api.Path) error {
-	arg := &api.ModPathsArguments{
-		Resource: api.Resource_GLOBAL,
-		Paths:    []*api.Path{p},
+	arg := &api.ModPathArguments{
+		Operation: api.Operation_ADD,
+		Resource:  api.Resource_GLOBAL,
+		Path:      p,
 	}
-
-	stream, err := d.client.ModPaths(context.Background())
-	if err != nil {
-		return err
+	ch := make(chan *server.GrpcResponse)
+	d.apiCh <- &server.GrpcRequest{
+		RequestType: server.REQ_MOD_PATH,
+		Data:        arg,
+		ResponseCh:  ch,
 	}
-
-	err = stream.Send(arg)
-	if err != nil {
-		return err
-	}
-	stream.CloseSend()
-
-	res, err := stream.CloseAndRecv()
-	if err != nil {
-		return err
-	}
-
-	if res.Code != api.Error_SUCCESS {
-		return fmt.Errorf("error: code: %d, msg: %s\n", res.Code, res.Msg)
-	}
-	return nil
+	return (<-ch).Err()
 }
 
 func (d *Dataplane) modRib(p *api.Path) error {
@@ -118,30 +102,29 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	route := &netlink.Route{
 		LinkIndex: routes[0].LinkIndex,
 		Dst:       dst,
-		Src:       net.IP(d.config.Bgp.Global.Config.RouterId),
+		Src:       net.ParseIP(d.config.Bgp.Global.Config.RouterId),
 	}
 	return netlink.RouteAdd(route)
 }
 
 func (d *Dataplane) monitorBest() error {
 
-	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-	client := api.NewGobgpApiClient(conn)
-
-	arg := &api.Table{
- 		Type:       api.Resource_GLOBAL,
-		Family:     uint32(bgp.RF_IPv4_UC),
-	}
-	err = func() error {
-		rib, err := client.GetRib(context.Background(), arg)
-		if err != nil {
+	err := func() error {
+		ch := make(chan *server.GrpcResponse)
+		d.apiCh <- &server.GrpcRequest{
+			RequestType: server.REQ_GLOBAL_RIB,
+			RouteFamily: bgp.RF_IPv4_UC,
+			ResponseCh:  ch,
+			Data: &api.Table{
+				Type:   api.Resource_GLOBAL,
+				Family: uint32(bgp.RF_IPv4_UC),
+			},
+		}
+		res := <-ch
+		if err := res.Err(); err != nil {
 			return err
 		}
+		rib := res.Data.(*api.Table)
 		for _, dst := range rib.Destinations {
 			for _, p := range dst.Paths {
 				if p.Best {
@@ -156,36 +139,24 @@ func (d *Dataplane) monitorBest() error {
 	if err != nil {
 		return err
 	}
-	arg2 := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Family:   uint32(bgp.RF_IPv4_UC),
-	}
-	stream, err := client.MonitorBestChanged(context.Background(), arg2)
-	if err != nil {
-		return err
-	}
 
-	for {
-		dst, err := stream.Recv()
-		if err == io.EOF {
-			break
-		} else if err != nil {
+	ch := make(chan *server.GrpcResponse, 8)
+	d.apiCh <- &server.GrpcRequest{
+		RequestType: server.REQ_MONITOR_GLOBAL_BEST_CHANGED,
+		RouteFamily: bgp.RF_IPv4_UC,
+		ResponseCh:  ch,
+	}
+	for res := range ch {
+		if err := res.Err(); err != nil {
 			return err
 		}
-
+		dst := res.Data.(*api.Destination)
 		d.modRibCh <- dst.Paths[0]
 	}
 	return nil
 }
 
 func (d *Dataplane) Serve() error {
-
-	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial("127.0.0.1:50051", timeout, grpc.WithBlock(), grpc.WithInsecure())
-	if err != nil {
-		log.Fatal(err)
-	}
-	d.client = api.NewGobgpApiClient(conn)
 
 	lo, err := netlink.LinkByName("lo")
 	if err != nil {
@@ -247,7 +218,7 @@ func (d *Dataplane) Serve() error {
 				log.Error("failed to adv path: ", err)
 			}
 		case v := <-d.addVnCh:
-			vn := NewVirtualNetwork(v, d.config.Bgp.Global)
+			vn := NewVirtualNetwork(v, d.config.Bgp.Global, d.apiCh)
 			d.vnMap[v.RD] = vn
 			d.t.Go(vn.Serve)
 		case v := <-d.delVnCh:
@@ -268,7 +239,7 @@ func (d *Dataplane) DeleteVirtualNetwork(c config.VirtualNetwork) error {
 	return nil
 }
 
-func NewDataplane(c *config.ConfigSet) *Dataplane {
+func NewDataplane(c *config.ConfigSet, apiCh chan *server.GrpcRequest) *Dataplane {
 	modRibCh := make(chan *api.Path, 16)
 	advPathCh := make(chan *api.Path, 16)
 	addVnCh := make(chan config.VirtualNetwork)
@@ -280,5 +251,6 @@ func NewDataplane(c *config.ConfigSet) *Dataplane {
 		addVnCh:   addVnCh,
 		delVnCh:   delVnCh,
 		vnMap:     make(map[string]*VirtualNetwork),
+		apiCh:     apiCh,
 	}
 }
