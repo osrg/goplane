@@ -1,0 +1,22 @@
+package: github.com/osrg/goplane
+import:
+- package: github.com/Sirupsen/logrus
+  subpackages:
+  - hooks/syslog
+- package: github.com/jessevdk/go-flags
+- package: github.com/osrg/gobgp
+  ref: 79a8275508e252213c857151f27a93abae43f6a1
+  subpackages:
+  - api
+  - config
+  - packet
+  - server
+- package: github.com/spf13/viper
+- package: github.com/vishvananda/netlink
+  subpackages:
+  - nl
+- package: golang.org/x/net
+  subpackages:
+  - context
+- package: google.golang.org/grpc
+- package: gopkg.in/tomb.v2
