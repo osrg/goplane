@@ -221,8 +221,8 @@ class BGPContainer(Container):
 
 class GoPlaneContainer(BGPContainer):
 
-    PEER_TYPE_INTERNAL = 0
-    PEER_TYPE_EXTERNAL = 1
+    PEER_TYPE_INTERNAL = 'internal'
+    PEER_TYPE_EXTERNAL = 'external'
     SHARED_VOLUME = '/root/shared_volume'
 
     def __init__(self, name, asn, router_id, ctn_image_name='goplane',
@@ -252,7 +252,7 @@ class GoPlaneContainer(BGPContainer):
         return self.WAIT_FOR_BOOT
 
     def create_config(self):
-        bgp_config = {'Global': {'GlobalConfig': {'As': self.asn, 'RouterId': self.router_id}}}
+        config = {'global': {'config': {'as': self.asn, 'router-id': self.router_id}}}
         for peer, info in self.peers.iteritems():
             if self.asn == peer.asn:
                 peer_type = self.PEER_TYPE_INTERNAL
@@ -262,34 +262,33 @@ class GoPlaneContainer(BGPContainer):
             afi_safi_list = []
             version = netaddr.IPNetwork(info['neigh_addr']).version
             if version == 4:
-                afi_safi_list.append({'AfiSafiName': 'ipv4-unicast'})
+                afi_safi_list.append({'afi-safi-name': 'ipv4-unicast', 'enabled': True})
             elif version == 6:
-                afi_safi_list.append({'AfiSafiName': 'ipv6-unicast'})
+                afi_safi_list.append({'afi-safi-name': 'ipv6-unicast', 'enabled': True})
             else:
                 Exception('invalid ip address version. {0}'.format(version))
 
             if info['evpn']:
-                afi_safi_list.append({'AfiSafiName': 'l2vpn-evpn'})
+                afi_safi_list.append({'afi-safi-name': 'l2vpn-evpn', 'enabled': True})
 
-            n = {'NeighborConfig':
-                    {'NeighborAddress': info['neigh_addr'].split('/')[0],
-                     'PeerAs': peer.asn,
-                     'AuthPassword': info['passwd'],
-                     'PeerType': peer_type,
-                    },
-                 'AfiSafis': {'AfiSafiList': afi_safi_list}
+            n = {'config': {
+                    'neighbor-address': info['neigh_addr'].split('/')[0],
+                    'peer-as': peer.asn,
+                    'auth-password': info['passwd'],
+                 },
+                 'afi-safis': afi_safi_list,
                 }
 
             if info['passive']:
-                n['TransportOptions'] = {'PassiveMode':True}
+                n['transport'] = {'config': {'passive-mode':True}}
 
             if info['is_rs_client']:
-                n['RouteServer'] = {'RouteServerClient': True}
+                n['route-server'] = {'config': {'route-server-client': True}}
 
-            if 'Neighbors' not in bgp_config:
-                bgp_config['Neighbors'] = {'NeighborList': []}
+            if 'neighbors' not in bgp_config:
+                bgp_config['neighbors'] = []
 
-            bgp_config['Neighbors']['NeighborList'].append(n)
+            bgp_config['neighbors'].append(n)
 
         dplane_config = {'Type': 'netlink', 'VirtualNetworkList': []}
         for info in self.vns:
