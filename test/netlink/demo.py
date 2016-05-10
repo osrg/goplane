@@ -262,14 +262,14 @@ class GoPlaneContainer(BGPContainer):
             afi_safi_list = []
             version = netaddr.IPNetwork(info['neigh_addr']).version
             if version == 4:
-                afi_safi_list.append({'afi-safi-name': 'ipv4-unicast'})
+                afi_safi_list.append({'config': {'afi-safi-name': 'ipv4-unicast'}})
             elif version == 6:
-                afi_safi_list.append({'afi-safi-name': 'ipv6-unicast'})
+                afi_safi_list.append({'config': {'afi-safi-name': 'ipv6-unicast'}})
             else:
                 Exception('invalid ip address version. {0}'.format(version))
 
             if info['evpn']:
-                afi_safi_list.append({'afi-safi-name': 'l2vpn-evpn'})
+                afi_safi_list.append({'config': {'afi-safi-name': 'l2vpn-evpn'}})
 
             n = {'config': {
                     'neighbor-address': info['neigh_addr'].split('/')[0],

@@ -53,7 +53,7 @@ func main() {
 		UseSyslog     string `short:"s" long:"syslog" description:"use syslogd"`
 		Facility      string `long:"syslog-facility" description:"specify syslog facility"`
 		DisableStdlog bool   `long:"disable-stdlog" description:"disable standard logging"`
-		GrpcPort      int    `long:"grpc-port" description:"grpc port" default:"50051"`
+		GrpcHost      string `long:"grpc-host" description:"grpc host" default:":50051"`
 	}
 	_, err := flags.Parse(&opts)
 	if err != nil {
@@ -145,7 +145,7 @@ func main() {
 		opts.ConfigFile = "goplaned.conf"
 	}
 
-	configCh := make(chan config.Config)
+	configCh := make(chan *config.Config)
 	reloadCh := make(chan bool)
 	go config.ReadConfigfileServe(opts.ConfigFile, opts.ConfigType, configCh, reloadCh)
 	reloadCh <- true
@@ -153,43 +153,48 @@ func main() {
 	go bgpServer.Serve()
 
 	// start grpc Server
-	grpcServer := bgpserver.NewGrpcServer(opts.GrpcPort, bgpServer.GrpcReqCh)
+	grpcServer := bgpserver.NewGrpcServer(opts.GrpcHost, bgpServer.GrpcReqCh)
 	go grpcServer.Serve()
 
 	var dataplane Dataplaner
-	var bgpConfig *bgpconf.Bgp
-	var policyConfig *bgpconf.RoutingPolicy
-	var dataplaneConfig *config.Dataplane
+	var c *config.Config
+	var d *config.Dataplane
 
 	for {
 		select {
 		case newConfig := <-configCh:
-			pol := bgpconf.RoutingPolicy{
-				PolicyDefinitions: newConfig.PolicyDefinitions,
-				DefinedSets:       newConfig.DefinedSets,
-			}
-			bgp := bgpconf.Bgp{
-				Global:      newConfig.Global,
-				Neighbors:   newConfig.Neighbors,
-				RpkiServers: newConfig.RpkiServers,
-			}
-			if policyConfig == nil {
-				policyConfig = &pol
-				bgpServer.SetRoutingPolicy(pol)
-			} else {
-				if bgpconf.CheckPolicyDifference(policyConfig, &pol) {
-					log.Info("Policy config is updated")
-					bgpServer.UpdatePolicy(pol)
+			var added, deleted, updated []bgpconf.Neighbor
+			var updatePolicy bool
+
+			if c == nil {
+				c = newConfig
+				if err := bgpServer.SetGlobalType(newConfig.Global); err != nil {
+					log.Fatalf("failed to set global config: %s", err)
 				}
-			}
+				if err := bgpServer.SetRpkiConfig(newConfig.RpkiServers); err != nil {
+					log.Fatalf("failed to set rpki config: %s", err)
+				}
+				if err := bgpServer.SetBmpConfig(newConfig.BmpServers); err != nil {
+					log.Fatalf("failed to set bmp config: %s", err)
+				}
+				if err := bgpServer.SetMrtConfig(newConfig.MrtDump); err != nil {
+					log.Fatalf("failed to set mrt config: %s", err)
+				}
+				p := config.ConfigToRoutingPolicy(newConfig)
+				if err := bgpServer.SetRoutingPolicy(*p); err != nil {
+					log.Fatalf("failed to set routing policy: %s", err)
+				}
 
-			if bgpConfig == nil {
-				bgpServer.SetGlobalType(newConfig.Global)
-				bgpServer.SetRpkiConfig(newConfig.RpkiServers)
+				added = newConfig.Neighbors
+			} else {
+				added, deleted, updated, updatePolicy = bgpconf.UpdateConfig(config.ConfigToBgpConfigSet(c), config.ConfigToBgpConfigSet(newConfig))
+				if updatePolicy {
+					log.Info("Policy config is updated")
+					p := bgpconf.ConfigSetToRoutingPolicy(config.ConfigToBgpConfigSet(newConfig))
+					bgpServer.UpdatePolicy(*p)
+				}
+				c = newConfig
 			}
-
-			c, added, deleted, updated := bgpconf.UpdateConfig(bgpConfig, &bgp)
-			bgpConfig = c
 
 			for _, p := range added {
 				log.Infof("Peer %v is added", p.Config.NeighborAddress)
@@ -201,14 +206,32 @@ func main() {
 			}
 			for _, p := range updated {
 				log.Infof("Peer %v is updated", p.Config.NeighborAddress)
-				bgpServer.PeerUpdate(p)
+				u, _ := bgpServer.PeerUpdate(p)
+				updatePolicy = updatePolicy || u
+			}
+
+			if updatePolicy {
+				// TODO: we want to apply the new policies to the existing
+				// routes here. Sending SOFT_RESET_IN to all the peers works
+				// for the change of in and import policies. SOFT_RESET_OUT is
+				// necessary for the export policy but we can't blindly
+				// execute SOFT_RESET_OUT because we unnecessarily advertize
+				// the existing routes. Needs to investigate the changes of
+				// policies and handle only affected peers.
+				ch := make(chan *bgpserver.GrpcResponse)
+				bgpServer.GrpcReqCh <- &bgpserver.GrpcRequest{
+					RequestType: bgpserver.REQ_NEIGHBOR_SOFT_RESET_IN,
+					Name:        "all",
+					ResponseCh:  ch,
+				}
+				<-ch
 			}
 
 			if dataplane == nil {
 				switch newConfig.Dataplane.Type {
 				case "netlink":
 					log.Debug("new dataplane: netlink")
-					dataplane = netlink.NewDataplane(&newConfig, bgpServer.GrpcReqCh)
+					dataplane = netlink.NewDataplane(newConfig, bgpServer.GrpcReqCh)
 					go func() {
 						err := dataplane.Serve()
 						if err != nil {
@@ -229,8 +252,8 @@ func main() {
 				}
 			}
 
-			as, ds := config.UpdateConfig(dataplaneConfig, newConfig.Dataplane)
-			dataplaneConfig = &newConfig.Dataplane
+			as, ds := config.UpdateConfig(d, newConfig.Dataplane)
+			d = &newConfig.Dataplane
 
 			for _, v := range as {
 				log.Infof("VirtualNetwork %s is added", v.RD)

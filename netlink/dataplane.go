@@ -19,7 +19,7 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	api "github.com/osrg/gobgp/api"
-	"github.com/osrg/gobgp/packet"
+	"github.com/osrg/gobgp/packet/bgp"
 	"github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
@@ -39,14 +39,13 @@ type Dataplane struct {
 }
 
 func (d *Dataplane) advPath(p *api.Path) error {
-	arg := &api.ModPathArguments{
-		Operation: api.Operation_ADD,
-		Resource:  api.Resource_GLOBAL,
-		Path:      p,
+	arg := &api.AddPathRequest{
+		Resource: api.Resource_GLOBAL,
+		Path:     p,
 	}
 	ch := make(chan *server.GrpcResponse)
 	d.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_MOD_PATH,
+		RequestType: server.REQ_ADD_PATH,
 		Data:        arg,
 		ResponseCh:  ch,
 	}
@@ -115,16 +114,18 @@ func (d *Dataplane) monitorBest() error {
 			RequestType: server.REQ_GLOBAL_RIB,
 			RouteFamily: bgp.RF_IPv4_UC,
 			ResponseCh:  ch,
-			Data: &api.Table{
-				Type:   api.Resource_GLOBAL,
-				Family: uint32(bgp.RF_IPv4_UC),
+			Data: &api.GetRibRequest{
+				Table: &api.Table{
+					Type:   api.Resource_GLOBAL,
+					Family: uint32(bgp.RF_IPv4_UC),
+				},
 			},
 		}
 		res := <-ch
 		if err := res.Err(); err != nil {
 			return err
 		}
-		rib := res.Data.(*api.Table)
+		rib := res.Data.(*api.GetRibResponse).Table
 		for _, dst := range rib.Destinations {
 			for _, p := range dst.Paths {
 				if p.Best {

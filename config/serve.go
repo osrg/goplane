@@ -21,10 +21,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-func ReadConfigfileServe(path, format string, configCh chan Config, reloadCh chan bool) {
+func ReadConfigfileServe(path, format string, configCh chan *Config, reloadCh chan bool) {
 	for {
 		<-reloadCh
-		c := Config{}
+		c := &Config{}
 		v := viper.New()
 		v.SetConfigFile(path)
 		v.SetConfigType(format)
@@ -36,7 +36,7 @@ func ReadConfigfileServe(path, format string, configCh chan Config, reloadCh cha
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
 		}
-		b := bgp.Bgp{
+		b := bgp.BgpConfigSet{
 			Global:      c.Global,
 			Neighbors:   c.Neighbors,
 			RpkiServers: c.RpkiServers,
@@ -76,4 +76,16 @@ func inSlice(one VirtualNetwork, list []VirtualNetwork) int {
 		}
 	}
 	return -1
+}
+
+func ConfigToBgpConfigSet(c *Config) *bgp.BgpConfigSet {
+	return &bgp.BgpConfigSet{
+		Global:            c.Global,
+		Neighbors:         c.Neighbors,
+		RpkiServers:       c.RpkiServers,
+		BmpServers:        c.BmpServers,
+		MrtDump:           c.MrtDump,
+		DefinedSets:       c.DefinedSets,
+		PolicyDefinitions: c.PolicyDefinitions,
+	}
 }

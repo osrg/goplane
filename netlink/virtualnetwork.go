@@ -20,7 +20,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	api "github.com/osrg/gobgp/api"
 	bgpconf "github.com/osrg/gobgp/config"
-	"github.com/osrg/gobgp/packet"
+	"github.com/osrg/gobgp/packet/bgp"
 	"github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
@@ -70,25 +70,39 @@ func (n *VirtualNetwork) modVrf(withdraw bool) error {
 		return err
 	}
 	rtbuf, _ := rt.Serialize()
-	op := api.Operation_ADD
-	if withdraw {
-		op = api.Operation_DEL
-	}
 	ch := make(chan *server.GrpcResponse)
-	arg := &api.ModVrfArguments{
-		Operation: op,
-		Vrf: &api.Vrf{
-			Name:     n.config.RD,
-			Rd:       rdbuf,
-			ImportRt: [][]byte{rtbuf},
-			ExportRt: [][]byte{rtbuf},
-		},
+	var req *server.GrpcRequest
+	if withdraw {
+		arg := &api.DeleteVrfRequest{
+			Vrf: &api.Vrf{
+				Name:     n.config.RD,
+				Rd:       rdbuf,
+				ImportRt: [][]byte{rtbuf},
+				ExportRt: [][]byte{rtbuf},
+			},
+		}
+		req = &server.GrpcRequest{
+			RequestType: server.REQ_DELETE_VRF,
+			Data:        arg,
+			ResponseCh:  ch,
+		}
+	} else {
+		arg := &api.AddVrfRequest{
+			Vrf: &api.Vrf{
+				Name:     n.config.RD,
+				Rd:       rdbuf,
+				ImportRt: [][]byte{rtbuf},
+				ExportRt: [][]byte{rtbuf},
+			},
+		}
+		req = &server.GrpcRequest{
+			RequestType: server.REQ_ADD_VRF,
+			Data:        arg,
+			ResponseCh:  ch,
+		}
+
 	}
-	n.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_VRF_MOD,
-		Data:        arg,
-		ResponseCh:  ch,
-	}
+	n.apiCh <- req
 	return (<-ch).Err()
 }
 
@@ -408,15 +422,14 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	pmsi, _ := bgp.NewPathAttributePmsiTunnel(bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL, false, 0, id).Serialize()
 	path.Pattrs = append(path.Pattrs, pmsi)
 
-	arg := &api.ModPathArguments{
-		Operation: api.Operation_ADD,
-		Resource:  api.Resource_VRF,
-		Name:      n.config.RD,
-		Path:      path,
+	arg := &api.AddPathRequest{
+		Resource: api.Resource_VRF,
+		VrfId:    n.config.RD,
+		Path:     path,
 	}
 	ch := make(chan *server.GrpcResponse)
 	n.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_MOD_PATH,
+		RequestType: server.REQ_ADD_PATH,
 		Data:        arg,
 		ResponseCh:  ch,
 	}
@@ -454,15 +467,14 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 	e, _ := bgp.NewPathAttributeExtendedCommunities([]bgp.ExtendedCommunityInterface{o}).Serialize()
 	path.Pattrs = append(path.Pattrs, e)
 
-	arg := &api.ModPathArguments{
-		Operation: api.Operation_ADD,
-		Resource:  api.Resource_VRF,
-		Name:      f.config.RD,
-		Path:      path,
+	arg := &api.AddPathRequest{
+		Resource: api.Resource_VRF,
+		VrfId:    f.config.RD,
+		Path:     path,
 	}
 	ch := make(chan *server.GrpcResponse)
 	f.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_MOD_PATH,
+		RequestType: server.REQ_ADD_PATH,
 		Data:        arg,
 		ResponseCh:  ch,
 	}
