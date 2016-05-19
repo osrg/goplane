@@ -5,7 +5,7 @@ import:
   - hooks/syslog
 - package: github.com/jessevdk/go-flags
 - package: github.com/osrg/gobgp
-  ref: f9a9c410c3b221b515bad9fcf154990be7bb70fa
+  ref: b281f7f4ffc965b8a88b0a85b5315b97ca512f68
   subpackages:
   - api
   - config
