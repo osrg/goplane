@@ -1,7 +1,7 @@
-goplane/firewalld: configure iptables via bgp flowspec
+Goplane/firewalld: configure iptables via bgp flowspec
 ---
 
-goplane/firewalld is a small program which configures [iptables](http://www.netfilter.org/projects/iptables/index.html) via [bgp flowspec](https://tools.ietf.org/html/rfc5575).
+Goplane/firewalld is a small program which configures [iptables](http://www.netfilter.org/projects/iptables/index.html) via [bgp flowspec](https://tools.ietf.org/html/rfc5575).
 
 You can make linux server as a flowspec capable firewall!
 
@@ -9,11 +9,10 @@ You can make linux server as a flowspec capable firewall!
 
 1. install go
 1. `$ go get github.com/osrg/goplane/firewalld`
-1. `$ go install github.com/osrg/goplane/firewalld`
 
 ### How to use
 
-goplane/firewalld is dependent on [GoBGP](https://github.com/osrg/gobgp).
+Goplane/firewalld is dependent on [GoBGP](https://github.com/osrg/gobgp).
 Before using firewalld, follow [this](https://github.com/osrg/gobgp/blob/master/docs/sources/getting-started.md) instruction and install GoBGP.
 
 
@@ -51,20 +50,20 @@ INFO[0000] cleared iptables chain: FORWARD, table: filter
 #### 3. inject flowspec routes to gobgpd
 
 Here we inject flowspec routes directly to `gobgpd`.
-But of course, `firewalld` will configure iptables by remotely received
+But of course, `firewalld` can also configure iptables by remotely received
 flowspec routes.
 
 ```shell
-$ gobgp global rib -a ipv4-flowspec add match destination 20.0.0.0/24 then discard
+$ gobgp global rib -a ipv4-flowspec add match destination 192.168.0.0/24 then discard
 
 # check the flowspec route is installed correctly in gobgpd
 $ gobgp global rib -a ipv4-flowspec
-    Network                  Next Hop             AS_PATH              Age        Attrs
-*>  [destination:50.0.0.0/24]fictitious                                00:00:06   [{Origin: ?} {Extcomms: [discard]}]
+    Network                     Next Hop             AS_PATH              Age        Attrs
+*>  [destination:192.168.0.0/24]fictitious                                00:00:06   [{Origin: ?} {Extcomms: [discard]}]
 
 # check iptables is configured correctly
 $ sudo iptables -L FLOWSPEC -n
 Chain FLOWSPEC (0 references)
 target     prot opt source               destination
-DROP       all  --  0.0.0.0/0            50.0.0.0/24
+DROP       all  --  0.0.0.0/0            192.168.0.0/24
 ```
