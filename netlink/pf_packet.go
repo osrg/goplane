@@ -23,6 +23,8 @@ package netlink
 //#include <string.h>
 //#include <stdio.h>
 //#include <errno.h>
+//#include <arpa/inet.h>
+//#include <unistd.h>
 //int PFPacketBind(char* name, int* intf_index, int* pd){
 //    struct ifreq ifr;
 //    struct sockaddr_ll sll;
