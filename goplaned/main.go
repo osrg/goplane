@@ -23,7 +23,6 @@ import (
 	bgpserver "github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/osrg/goplane/netlink"
-	//	"github.com/osrg/goplane/ovs"
 	"io/ioutil"
 	"log/syslog"
 	"os"
@@ -238,15 +237,6 @@ func main() {
 							log.Errorf("dataplane finished with err: %s", err)
 						}
 					}()
-					//				case "ovs":
-					//					log.Debug("new dataplane: ovs")
-					//					dataplane = ovs.NewDataplane(&newConfig)
-					//					go func() {
-					//						err := dataplane.Serve()
-					//						if err != nil {
-					//							log.Errorf("dataplane finished with err: %s", err)
-					//						}
-					//					}()
 				default:
 					log.Errorf("Invalid dataplane type(%s). dataplane engine can't be started", newConfig.Dataplane.Type)
 				}
