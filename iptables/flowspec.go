@@ -13,19 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package iptables
 
 import (
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/jessevdk/go-flags"
 	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/packet/bgp"
+	"github.com/osrg/goplane/config"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -108,47 +107,34 @@ func FlowSpec2IptablesRule(nlri []bgp.FlowSpecComponentInterface, attr []bgp.Pat
 	return spec, nil
 }
 
-func main() {
-	var opts struct {
-		GrpcHost string `long:"grpc-host" description:"gobgp grpc host:port" default:":50051"`
-		LogLevel string `short:"l" long:"log-level" description:"log level" default:"info"`
-		Chain    string `long:"chain" description:"chain to insert flowspec rules" default:"FLOWSPEC"`
-	}
+type FlowspecAgent struct {
+	config   config.Iptables
+	grpcHost string
+}
 
-	_, err := flags.Parse(&opts)
-	if err != nil {
-		os.Exit(1)
-	}
-
-	switch opts.LogLevel {
-	case "debug":
-		log.SetLevel(log.DebugLevel)
-	default:
-		log.SetLevel(log.InfoLevel)
-	}
-
-	log.Info("firewalld started")
-
+func (a *FlowspecAgent) Serve() error {
 	ipt, err := iptables.New()
 	if err != nil {
 		log.Fatalf("%s", err)
 	}
 
 	table := "filter"
-	chain := opts.Chain
+	chain := "FLOWSPEC"
+	if a.config.Chain != "" {
+		chain = a.config.Chain
+	}
 
 	if err := ipt.ClearChain(table, chain); err != nil {
-		log.Fatalf("failed to clear chain: %s", err)
-	} else {
-		log.Infof("cleared iptables chain: %s, table: %s", chain, table)
+		return fmt.Errorf("failed to clear chain: %s", err)
 	}
+	log.Infof("cleared iptables chain: %s, table: %s", chain, table)
 
 	ch := make(chan *Path, 16)
 
 	go func() {
 
 		timeout := grpc.WithTimeout(time.Second)
-		conn, err := grpc.Dial(opts.GrpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
+		conn, err := grpc.Dial(a.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
@@ -274,5 +260,13 @@ func main() {
 				log.Debugf("insert iptables rule: %v", spec)
 			}
 		}
+	}
+	return nil
+}
+
+func NewFlowspecAgent(grpcHost string, c config.Iptables) *FlowspecAgent {
+	return &FlowspecAgent{
+		config:   c,
+		grpcHost: grpcHost,
 	}
 }

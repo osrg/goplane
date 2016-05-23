@@ -1,7 +1,7 @@
 goplane evpn/vxlan demo
 ===
 
-This demo shows l2-vpn construction using [evpn/vxlan](https://tools.ietf.org/html/draft-ietf-bess-evpn-overlay-01).
+This demo shows l2-vpn construction using [BGP/EVPN](https://tools.ietf.org/html/rfc7432) and VxLAN
 
 ## How to run
 you only need to type 3 commands to play (tested in Ubuntu trusty).

@@ -30,6 +30,12 @@ type Dataplane struct {
 	VirtualNetworkList []VirtualNetwork `mapstructure:"virtual-network-list"`
 }
 
+type Iptables struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Chain   string `mapstructure:"chain"`
+}
+
 type Config struct {
 	Dataplane Dataplane `mapstructure:"dataplane"`
+	Iptables  Iptables  `mapstructure:"iptables"`
 }

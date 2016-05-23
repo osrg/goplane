@@ -28,6 +28,7 @@ import (
 	"github.com/Sirupsen/logrus/hooks/syslog"
 	"github.com/jessevdk/go-flags"
 	"github.com/osrg/goplane/config"
+	"github.com/osrg/goplane/iptables"
 	"github.com/osrg/goplane/netlink"
 )
 
@@ -150,6 +151,7 @@ func main() {
 
 	var dataplane Dataplaner
 	var d *config.Dataplane
+	var fsAgent *iptables.FlowspecAgent
 	for {
 		select {
 		case newConfig := <-configCh:
@@ -179,6 +181,16 @@ func main() {
 			for _, v := range ds {
 				log.Infof("VirtualNetwork %s is deleted", v.RD)
 				dataplane.DeleteVirtualNetwork(v)
+			}
+
+			if fsAgent == nil && newConfig.Iptables.Enabled {
+				fsAgent = iptables.NewFlowspecAgent(opts.GrpcHost, newConfig.Iptables)
+				go func() {
+					err := fsAgent.Serve()
+					if err != nil {
+						log.Errorf("flowspec agent finished with err: %s", err)
+					}
+				}()
 			}
 
 		case sig := <-sigCh:
