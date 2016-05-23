@@ -236,22 +236,48 @@ class GoPlaneContainer(BGPContainer):
     def start_goplane(self):
         c = CmdBuffer()
         c << '#!/bin/bash'
+        c << 'gobgpd -f {0}/gobgpd.conf -l {1} -p > ' \
+             '{0}/gobgpd.log 2>&1'.format(self.SHARED_VOLUME, self.log_level)
+        cmd = 'echo "{0:s}" > {1}/start_gobgp.sh'.format(c, self.config_dir)
+        local(cmd, capture=True)
+        cmd = "chmod 755 {0}/start_gobgp.sh".format(self.config_dir)
+        local(cmd, capture=True)
+        cmd = 'docker exec -d {0} {1}/start_gobgp.sh'.format(self.name,
+                                                             self.SHARED_VOLUME)
+        local(cmd, capture=True)
+
         c << 'goplaned -f {0}/goplaned.conf -l {1} -p > ' \
              '{0}/goplaned.log 2>&1'.format(self.SHARED_VOLUME, self.log_level)
-
-        cmd = 'echo "{0:s}" > {1}/start.sh'.format(c, self.config_dir)
+        cmd = 'echo "{0:s}" > {1}/start_goplane.sh'.format(c, self.config_dir)
         local(cmd, capture=True)
-        cmd = "chmod 755 {0}/start.sh".format(self.config_dir)
+        cmd = "chmod 755 {0}/start_goplane.sh".format(self.config_dir)
         local(cmd, capture=True)
-        cmd = 'docker exec -d {0} {1}/start.sh'.format(self.name,
-                                                       self.SHARED_VOLUME)
+        cmd = 'docker exec -d {0} {1}/start_goplane.sh'.format(self.name,
+                                                               self.SHARED_VOLUME)
         local(cmd, capture=True)
 
     def run(self):
         super(GoPlaneContainer, self).run()
         return self.WAIT_FOR_BOOT
 
-    def create_config(self):
+    def create_goplane_config(self):
+        dplane_config = {'type': 'netlink', 'virtual-network-list': []}
+        for info in self.vns:
+            dplane_config['virtual-network-list'].append({'rd': '{0}:{1}'.format(self.asn, info['vni']),
+                                                          'vni': info['vni'],
+                                                          'vxlan-port': info['vxlan_port'],
+                                                          'vtep-interface': info['vtep'],
+                                                          'etag': info['color'],
+                                                          'sniff-interfaces': info['member'],
+                                                          'member-interfaces': info['member']})
+
+        config = {'dataplane': dplane_config}
+
+        with open('{0}/goplaned.conf'.format(self.config_dir), 'w') as f:
+            print colors.yellow(toml.dumps(config))
+            f.write(toml.dumps(config))
+
+    def create_gobgp_config(self):
         config = {'global': {'config': {'as': self.asn, 'router-id': self.router_id}}}
         for peer, info in self.peers.iteritems():
             if self.asn == peer.asn:
@@ -291,23 +317,17 @@ class GoPlaneContainer(BGPContainer):
 
             config['neighbors'].append(n)
 
-        dplane_config = {'type': 'netlink', 'virtual-network-list': []}
-        for info in self.vns:
-            dplane_config['virtual-network-list'].append({'rd': '{0}:{1}'.format(self.asn, info['vni']),
-                                                          'vni': info['vni'],
-                                                          'vxlan-port': info['vxlan_port'],
-                                                          'vtep-interface': info['vtep'],
-                                                          'etag': info['color'],
-                                                          'sniff-interfaces': info['member'],
-                                                          'member-interfaces': info['member']})
-
-        config['dataplane'] = dplane_config
-
-        with open('{0}/goplaned.conf'.format(self.config_dir), 'w') as f:
+        with open('{0}/gobgpd.conf'.format(self.config_dir), 'w') as f:
             print colors.yellow(toml.dumps(config))
             f.write(toml.dumps(config))
 
+    def create_config(self):
+        self.create_gobgp_config()
+        self.create_goplane_config()
+
     def reload_config(self):
+        cmd = 'docker exec {0} /usr/bin/pkill gobgpd -SIGHUP'.format(self.name)
+        local(cmd, capture=True)
         cmd = 'docker exec {0} /usr/bin/pkill goplaned -SIGHUP'.format(self.name)
         local(cmd, capture=True)
 

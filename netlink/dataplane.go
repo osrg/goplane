@@ -17,14 +17,17 @@ package netlink
 
 import (
 	"fmt"
+	"net"
+	"time"
+
 	log "github.com/Sirupsen/logrus"
 	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/packet/bgp"
-	"github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 	"gopkg.in/tomb.v2"
-	"net"
 )
 
 type Dataplane struct {
@@ -35,7 +38,9 @@ type Dataplane struct {
 	vnMap     map[string]*VirtualNetwork
 	addVnCh   chan config.VirtualNetwork
 	delVnCh   chan config.VirtualNetwork
-	apiCh     chan *server.GrpcRequest
+	grpcHost  string
+	client    api.GobgpApiClient
+	routerId  string
 }
 
 func (d *Dataplane) advPath(p *api.Path) error {
@@ -43,13 +48,8 @@ func (d *Dataplane) advPath(p *api.Path) error {
 		Resource: api.Resource_GLOBAL,
 		Path:     p,
 	}
-	ch := make(chan *server.GrpcResponse)
-	d.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_ADD_PATH,
-		Data:        arg,
-		ResponseCh:  ch,
-	}
-	return (<-ch).Err()
+	_, err := d.client.AddPath(context.Background(), arg)
+	return err
 }
 
 func (d *Dataplane) modRib(p *api.Path) error {
@@ -101,7 +101,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	route := &netlink.Route{
 		LinkIndex: routes[0].LinkIndex,
 		Dst:       dst,
-		Src:       net.ParseIP(d.config.Global.Config.RouterId),
+		Src:       net.ParseIP(d.routerId),
 	}
 	return netlink.RouteAdd(route)
 }
@@ -109,23 +109,16 @@ func (d *Dataplane) modRib(p *api.Path) error {
 func (d *Dataplane) monitorBest() error {
 
 	err := func() error {
-		ch := make(chan *server.GrpcResponse)
-		d.apiCh <- &server.GrpcRequest{
-			RequestType: server.REQ_GLOBAL_RIB,
-			RouteFamily: bgp.RF_IPv4_UC,
-			ResponseCh:  ch,
-			Data: &api.GetRibRequest{
-				Table: &api.Table{
-					Type:   api.Resource_GLOBAL,
-					Family: uint32(bgp.RF_IPv4_UC),
-				},
+		rsp, err := d.client.GetRib(context.Background(), &api.GetRibRequest{
+			Table: &api.Table{
+				Type:   api.Resource_GLOBAL,
+				Family: uint32(bgp.RF_IPv4_UC),
 			},
-		}
-		res := <-ch
-		if err := res.Err(); err != nil {
+		})
+		if err != nil {
 			return err
 		}
-		rib := res.Data.(*api.GetRibResponse).Table
+		rib := rsp.Table
 		for _, dst := range rib.Destinations {
 			for _, p := range dst.Paths {
 				if p.Best {
@@ -141,23 +134,36 @@ func (d *Dataplane) monitorBest() error {
 		return err
 	}
 
-	ch := make(chan *server.GrpcResponse, 8)
-	d.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_MONITOR_GLOBAL_BEST_CHANGED,
-		RouteFamily: bgp.RF_IPv4_UC,
-		ResponseCh:  ch,
+	arg := &api.Arguments{
+		Resource: api.Resource_GLOBAL,
+		Family:   uint32(bgp.RF_IPv4_UC),
 	}
-	for res := range ch {
-		if err := res.Err(); err != nil {
+	stream, err := d.client.MonitorBestChanged(context.Background(), arg)
+	if err != nil {
+		return err
+	}
+	for {
+		dst, err := stream.Recv()
+		if err != nil {
 			return err
 		}
-		dst := res.Data.(*api.Destination)
 		d.modRibCh <- dst.Paths[0]
 	}
 	return nil
 }
 
 func (d *Dataplane) Serve() error {
+	timeout := grpc.WithTimeout(time.Second)
+	conn, err := grpc.Dial(d.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
+	d.client = api.NewGobgpApiClient(conn)
+	rsp, err := d.client.GetServer(context.Background(), &api.GetServerRequest{})
+	if err != nil {
+		return err
+	}
+	d.routerId = rsp.Global.RouterId
 
 	lo, err := netlink.LinkByName("lo")
 	if err != nil {
@@ -169,11 +175,9 @@ func (d *Dataplane) Serve() error {
 		return fmt.Errorf("failed to get addr list of lo")
 	}
 
-	routerId := d.config.Global.Config.RouterId
-
-	addr, err := netlink.ParseAddr(routerId + "/32")
+	addr, err := netlink.ParseAddr(d.routerId + "/32")
 	if err != nil {
-		return fmt.Errorf("failed to parse addr: %s", routerId)
+		return fmt.Errorf("failed to parse addr: %s", d.routerId)
 	}
 
 	exist := false
@@ -194,7 +198,7 @@ func (d *Dataplane) Serve() error {
 	path := &api.Path{
 		Pattrs: make([][]byte, 0),
 	}
-	path.Nlri, _ = bgp.NewIPAddrPrefix(uint8(32), routerId).Serialize()
+	path.Nlri, _ = bgp.NewIPAddrPrefix(uint8(32), d.routerId).Serialize()
 	n, _ := bgp.NewPathAttributeNextHop("0.0.0.0").Serialize()
 	path.Pattrs = append(path.Pattrs, n)
 	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
@@ -219,7 +223,7 @@ func (d *Dataplane) Serve() error {
 				log.Error("failed to adv path: ", err)
 			}
 		case v := <-d.addVnCh:
-			vn := NewVirtualNetwork(v, d.config.Global, d.apiCh)
+			vn := NewVirtualNetwork(v, d.routerId, d.grpcHost)
 			d.vnMap[v.RD] = vn
 			d.t.Go(vn.Serve)
 		case v := <-d.delVnCh:
@@ -240,7 +244,7 @@ func (d *Dataplane) DeleteVirtualNetwork(c config.VirtualNetwork) error {
 	return nil
 }
 
-func NewDataplane(c *config.Config, apiCh chan *server.GrpcRequest) *Dataplane {
+func NewDataplane(c *config.Config, grpcHost string) *Dataplane {
 	modRibCh := make(chan *api.Path, 16)
 	advPathCh := make(chan *api.Path, 16)
 	addVnCh := make(chan config.VirtualNetwork)
@@ -252,6 +256,6 @@ func NewDataplane(c *config.Config, apiCh chan *server.GrpcRequest) *Dataplane {
 		addVnCh:   addVnCh,
 		delVnCh:   delVnCh,
 		vnMap:     make(map[string]*VirtualNetwork),
-		apiCh:     apiCh,
+		grpcHost:  grpcHost,
 	}
 }

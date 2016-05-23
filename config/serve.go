@@ -17,7 +17,6 @@ package config
 
 import (
 	log "github.com/Sirupsen/logrus"
-	bgp "github.com/osrg/gobgp/config"
 	"github.com/spf13/viper"
 )
 
@@ -36,15 +35,6 @@ func ReadConfigfileServe(path, format string, configCh chan *Config, reloadCh ch
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
 		}
-		b := bgp.BgpConfigSet{
-			Global:      c.Global,
-			Neighbors:   c.Neighbors,
-			RpkiServers: c.RpkiServers,
-		}
-		err = bgp.SetDefaultConfigValues(v, &b)
-		c.Global = b.Global
-		c.Neighbors = b.Neighbors
-		c.RpkiServers = b.RpkiServers
 		configCh <- c
 	}
 }
@@ -76,16 +66,4 @@ func inSlice(one VirtualNetwork, list []VirtualNetwork) int {
 		}
 	}
 	return -1
-}
-
-func ConfigToBgpConfigSet(c *Config) *bgp.BgpConfigSet {
-	return &bgp.BgpConfigSet{
-		Global:            c.Global,
-		Neighbors:         c.Neighbors,
-		RpkiServers:       c.RpkiServers,
-		BmpServers:        c.BmpServers,
-		MrtDump:           c.MrtDump,
-		DefinedSets:       c.DefinedSets,
-		PolicyDefinitions: c.PolicyDefinitions,
-	}
 }

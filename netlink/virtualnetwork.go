@@ -19,15 +19,16 @@ import (
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	api "github.com/osrg/gobgp/api"
-	bgpconf "github.com/osrg/gobgp/config"
 	"github.com/osrg/gobgp/packet/bgp"
-	"github.com/osrg/gobgp/server"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 	"gopkg.in/tomb.v2"
 	"net"
 	"syscall"
+	"time"
 )
 
 type netlinkEvent struct {
@@ -40,12 +41,13 @@ type VirtualNetwork struct {
 	t           tomb.Tomb
 	connMap     map[string]net.Conn
 	config      config.VirtualNetwork
-	global      bgpconf.Global
 	multicastCh chan *Path
 	macadvCh    chan *Path
 	floodCh     chan []byte
 	netlinkCh   chan *netlinkEvent
-	apiCh       chan *server.GrpcRequest
+	grpcHost    string
+	client      api.GobgpApiClient
+	routerId    string
 }
 
 type Path struct {
@@ -70,8 +72,6 @@ func (n *VirtualNetwork) modVrf(withdraw bool) error {
 		return err
 	}
 	rtbuf, _ := rt.Serialize()
-	ch := make(chan *server.GrpcResponse)
-	var req *server.GrpcRequest
 	if withdraw {
 		arg := &api.DeleteVrfRequest{
 			Vrf: &api.Vrf{
@@ -81,11 +81,7 @@ func (n *VirtualNetwork) modVrf(withdraw bool) error {
 				ExportRt: [][]byte{rtbuf},
 			},
 		}
-		req = &server.GrpcRequest{
-			RequestType: server.REQ_DELETE_VRF,
-			Data:        arg,
-			ResponseCh:  ch,
-		}
+		_, err = n.client.DeleteVrf(context.Background(), arg)
 	} else {
 		arg := &api.AddVrfRequest{
 			Vrf: &api.Vrf{
@@ -95,18 +91,19 @@ func (n *VirtualNetwork) modVrf(withdraw bool) error {
 				ExportRt: [][]byte{rtbuf},
 			},
 		}
-		req = &server.GrpcRequest{
-			RequestType: server.REQ_ADD_VRF,
-			Data:        arg,
-			ResponseCh:  ch,
-		}
-
+		_, err = n.client.AddVrf(context.Background(), arg)
 	}
-	n.apiCh <- req
-	return (<-ch).Err()
+	return err
 }
 
 func (n *VirtualNetwork) Serve() error {
+	timeout := grpc.WithTimeout(time.Second)
+	conn, err := grpc.Dial(n.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
+	n.client = api.NewGobgpApiClient(conn)
+
 	log.Debugf("vtep intf: %s", n.config.VtepInterface)
 	link, err := netlink.LinkByName(n.config.VtepInterface)
 	master := 0
@@ -179,7 +176,7 @@ func (n *VirtualNetwork) Serve() error {
 			Name: n.config.VtepInterface,
 		},
 		VxlanId: int(n.config.VNI),
-		SrcAddr: net.ParseIP(n.global.Config.RouterId),
+		SrcAddr: net.ParseIP(n.routerId),
 	}
 
 	log.Debugf("add %s", n.config.VtepInterface)
@@ -408,7 +405,7 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	multicastEtag := &bgp.EVPNMulticastEthernetTagRoute{
 		RD:              rd,
 		IPAddressLength: uint8(32),
-		IPAddress:       net.ParseIP(n.global.Config.RouterId),
+		IPAddress:       net.ParseIP(n.routerId),
 		ETag:            uint32(n.config.Etag),
 	}
 	nlri := bgp.NewEVPNNLRI(bgp.EVPN_INCLUSIVE_MULTICAST_ETHERNET_TAG, 0, multicastEtag)
@@ -417,7 +414,7 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 	path.Pattrs = append(path.Pattrs, mpreach)
 
 	id := &bgp.IngressReplTunnelID{
-		Value: net.ParseIP(n.global.Config.RouterId),
+		Value: net.ParseIP(n.routerId),
 	}
 	pmsi, _ := bgp.NewPathAttributePmsiTunnel(bgp.PMSI_TUNNEL_TYPE_INGRESS_REPL, false, 0, id).Serialize()
 	path.Pattrs = append(path.Pattrs, pmsi)
@@ -427,13 +424,8 @@ func (n *VirtualNetwork) sendMulticast(withdraw bool) error {
 		VrfId:    n.config.RD,
 		Path:     path,
 	}
-	ch := make(chan *server.GrpcResponse)
-	n.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_ADD_PATH,
-		Data:        arg,
-		ResponseCh:  ch,
-	}
-	return (<-ch).Err()
+	_, err := n.client.AddPath(context.Background(), arg)
+	return err
 }
 
 func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
@@ -472,95 +464,87 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 		VrfId:    f.config.RD,
 		Path:     path,
 	}
-	ch := make(chan *server.GrpcResponse)
-	f.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_ADD_PATH,
-		Data:        arg,
-		ResponseCh:  ch,
-	}
-	return (<-ch).Err()
+	_, err := f.client.AddPath(context.Background(), arg)
+	return err
 }
 
 func (n *VirtualNetwork) monitorBest() error {
-
-	f := func(ch chan *server.GrpcResponse) error {
-		for res := range ch {
-			if res.Err() != nil {
-				return res.Err()
-			}
-			dst := res.Data.(*api.Destination)
-			var path *api.Path
-			for _, p := range dst.Paths {
-				if p.Best {
-					path = p
-					break
-				}
-			}
-			if path == nil {
-				path = dst.Paths[0]
-			}
-
-			var nexthop net.IP
-			pattrs := make([]bgp.PathAttributeInterface, 0, len(path.Pattrs))
-			afi, safi := bgp.RouteFamilyToAfiSafi(bgp.RouteFamily(path.Family))
-			nlri, err := bgp.NewPrefixFromRouteFamily(afi, safi)
-			if err != nil {
-				return err
-			}
-			err = nlri.DecodeFromBytes(path.Nlri)
-			if err != nil {
-				return err
-			}
-			for _, attr := range path.Pattrs {
-				p, err := bgp.GetPathAttribute(attr)
-				if err != nil {
-					return err
-				}
-
-				err = p.DecodeFromBytes(attr)
-				if err != nil {
-					return err
-				}
-
-				switch p.GetType() {
-				case bgp.BGP_ATTR_TYPE_MP_REACH_NLRI:
-					mpreach := p.(*bgp.PathAttributeMpReachNLRI)
-					if len(mpreach.Value) != 1 {
-						return fmt.Errorf("include only one route in mp_reach_nlri")
-					}
-					nexthop = mpreach.Nexthop
-				}
-				pattrs = append(pattrs, p)
-			}
-
-			p := &Path{
-				Nlri:       nlri,
-				Nexthop:    nexthop,
-				Pattrs:     pattrs,
-				IsWithdraw: path.IsWithdraw,
-			}
-
-			_, ok := nlri.(*bgp.EVPNNLRI)
-			if !ok {
-				continue
-			}
-
-			switch nlri.(*bgp.EVPNNLRI).RouteType {
-			case bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
-				n.macadvCh <- p
-			case bgp.EVPN_INCLUSIVE_MULTICAST_ETHERNET_TAG:
-				n.multicastCh <- p
+	arg := &api.Arguments{
+		Resource: api.Resource_GLOBAL,
+		Family:   uint32(bgp.RF_EVPN),
+	}
+	stream, err := n.client.MonitorBestChanged(context.Background(), arg)
+	if err != nil {
+		return err
+	}
+	for {
+		dst, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		var path *api.Path
+		for _, p := range dst.Paths {
+			if p.Best {
+				path = p
+				break
 			}
 		}
-		return nil
+		if path == nil {
+			path = dst.Paths[0]
+		}
+
+		var nexthop net.IP
+		pattrs := make([]bgp.PathAttributeInterface, 0, len(path.Pattrs))
+		afi, safi := bgp.RouteFamilyToAfiSafi(bgp.RouteFamily(path.Family))
+		nlri, err := bgp.NewPrefixFromRouteFamily(afi, safi)
+		if err != nil {
+			return err
+		}
+		err = nlri.DecodeFromBytes(path.Nlri)
+		if err != nil {
+			return err
+		}
+		for _, attr := range path.Pattrs {
+			p, err := bgp.GetPathAttribute(attr)
+			if err != nil {
+				return err
+			}
+
+			err = p.DecodeFromBytes(attr)
+			if err != nil {
+				return err
+			}
+
+			switch p.GetType() {
+			case bgp.BGP_ATTR_TYPE_MP_REACH_NLRI:
+				mpreach := p.(*bgp.PathAttributeMpReachNLRI)
+				if len(mpreach.Value) != 1 {
+					return fmt.Errorf("include only one route in mp_reach_nlri")
+				}
+				nexthop = mpreach.Nexthop
+			}
+			pattrs = append(pattrs, p)
+		}
+
+		p := &Path{
+			Nlri:       nlri,
+			Nexthop:    nexthop,
+			Pattrs:     pattrs,
+			IsWithdraw: path.IsWithdraw,
+		}
+
+		_, ok := nlri.(*bgp.EVPNNLRI)
+		if !ok {
+			continue
+		}
+
+		switch nlri.(*bgp.EVPNNLRI).RouteType {
+		case bgp.EVPN_ROUTE_TYPE_MAC_IP_ADVERTISEMENT:
+			n.macadvCh <- p
+		case bgp.EVPN_INCLUSIVE_MULTICAST_ETHERNET_TAG:
+			n.multicastCh <- p
+		}
 	}
-	ch := make(chan *server.GrpcResponse)
-	n.apiCh <- &server.GrpcRequest{
-		RequestType: server.REQ_MONITOR_GLOBAL_BEST_CHANGED,
-		RouteFamily: bgp.RF_EVPN,
-		ResponseCh:  ch,
-	}
-	return f(ch)
 }
 
 func (f *VirtualNetwork) sniffPkt(fd int) error {
@@ -628,7 +612,7 @@ func (f *VirtualNetwork) monitorNetlink() error {
 	}
 }
 
-func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global, apiCh chan *server.GrpcRequest) *VirtualNetwork {
+func NewVirtualNetwork(config config.VirtualNetwork, routerId, grpcHost string) *VirtualNetwork {
 	macadvCh := make(chan *Path, 16)
 	multicastCh := make(chan *Path, 16)
 	floodCh := make(chan []byte, 16)
@@ -636,12 +620,12 @@ func NewVirtualNetwork(config config.VirtualNetwork, global bgpconf.Global, apiC
 
 	return &VirtualNetwork{
 		config:      config,
-		global:      global,
 		connMap:     map[string]net.Conn{},
 		macadvCh:    macadvCh,
 		multicastCh: multicastCh,
 		floodCh:     floodCh,
 		netlinkCh:   netlinkCh,
-		apiCh:       apiCh,
+		routerId:    routerId,
+		grpcHost:    grpcHost,
 	}
 }

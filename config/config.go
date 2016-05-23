@@ -15,8 +15,6 @@
 
 package config
 
-import bgp "github.com/osrg/gobgp/config"
-
 type VirtualNetwork struct {
 	RD               string   `mapstructure:"rd"`
 	VNI              uint32   `mapstructure:"vni"`
@@ -33,19 +31,5 @@ type Dataplane struct {
 }
 
 type Config struct {
-	Global            bgp.Global             `mapstructure:"global"`
-	Neighbors         []bgp.Neighbor         `mapstructure:"neighbors"`
-	RpkiServers       []bgp.RpkiServer       `mapstructure:"rpki-servers"`
-	BmpServers        []bgp.BmpServer        `mapstructure:"bmp-servers"`
-	MrtDump           []bgp.Mrt              `mapstructure:"mrt-dump"`
-	DefinedSets       bgp.DefinedSets        `mapstructure:"defined-sets"`
-	PolicyDefinitions []bgp.PolicyDefinition `mapstructure:"policy-definitions"`
-	Dataplane         Dataplane              `mapstructure:"dataplane"`
-}
-
-func ConfigToRoutingPolicy(c *Config) *bgp.RoutingPolicy {
-	return &bgp.RoutingPolicy{
-		DefinedSets:       c.DefinedSets,
-		PolicyDefinitions: c.PolicyDefinitions,
-	}
+	Dataplane Dataplane `mapstructure:"dataplane"`
 }
