@@ -102,6 +102,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 		LinkIndex: routes[0].LinkIndex,
 		Dst:       dst,
 		Src:       net.ParseIP(d.routerId),
+		Gw:        nexthop,
 	}
 	return netlink.RouteAdd(route)
 }
