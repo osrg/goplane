@@ -118,6 +118,9 @@ func (d *Dataplane) modRib(p *api.Path) error {
 			}
 		}
 	}
+	if p.IsWithdraw {
+		return nil
+	}
 	return netlink.RouteAdd(route)
 }
 
