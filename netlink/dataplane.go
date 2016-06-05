@@ -104,6 +104,20 @@ func (d *Dataplane) modRib(p *api.Path) error {
 		Src:       net.ParseIP(d.routerId),
 		Gw:        nexthop,
 	}
+	link, err := netlink.LinkByIndex(routes[0].LinkIndex)
+	if err != nil {
+		return err
+	} else {
+		routes, _ := netlink.RouteList(link, netlink.FAMILY_V4)
+		for _, route := range routes {
+			if route.Dst != nil && route.Dst.String() == dst.String() {
+				err = netlink.RouteDel(&route)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return netlink.RouteAdd(route)
 }
 
