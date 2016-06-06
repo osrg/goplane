@@ -168,12 +168,12 @@ func (a *FlowspecAgent) Serve() error {
 			}
 		}
 
-		arg := &api.Arguments{
-			Resource: api.Resource_GLOBAL,
-			Family:   uint32(bgp.RF_FS_IPv4_UC),
+		arg := &api.Table{
+			Type:   api.Resource_GLOBAL,
+			Family: uint32(bgp.RF_FS_IPv4_UC),
 		}
 
-		stream, err := client.MonitorBestChanged(context.Background(), arg)
+		stream, err := client.MonitorRib(context.Background(), arg)
 		if err != nil {
 			log.Fatalf("%s", err)
 		}

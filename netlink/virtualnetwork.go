@@ -469,11 +469,11 @@ func (f *VirtualNetwork) modPath(n *netlinkEvent) error {
 }
 
 func (n *VirtualNetwork) monitorBest() error {
-	arg := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Family:   uint32(bgp.RF_EVPN),
+	arg := &api.Table{
+		Type:   api.Resource_GLOBAL,
+		Family: uint32(bgp.RF_EVPN),
 	}
-	stream, err := n.client.MonitorBestChanged(context.Background(), arg)
+	stream, err := n.client.MonitorRib(context.Background(), arg)
 	if err != nil {
 		return err
 	}

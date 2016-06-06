@@ -142,11 +142,11 @@ func (d *Dataplane) monitorBest() error {
 		return err
 	}
 
-	arg := &api.Arguments{
-		Resource: api.Resource_GLOBAL,
-		Family:   uint32(bgp.RF_IPv4_UC),
+	arg := &api.Table{
+		Type:   api.Resource_GLOBAL,
+		Family: uint32(bgp.RF_IPv4_UC),
 	}
-	stream, err := d.client.MonitorBestChanged(context.Background(), arg)
+	stream, err := d.client.MonitorRib(context.Background(), arg)
 	if err != nil {
 		return err
 	}
