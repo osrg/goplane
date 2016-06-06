@@ -93,16 +93,11 @@ func (d *Dataplane) modRib(p *api.Path) error {
 		return nil
 	}
 
-	routes, _ := netlink.RouteGet(nexthop)
-	if len(routes) == 0 {
-		return fmt.Errorf("no route to nexthop: %s", nexthop)
-	}
 	dst, _ := netlink.ParseIPNet(nlri.String())
 	route := &netlink.Route{
-		LinkIndex: routes[0].LinkIndex,
-		Dst:       dst,
-		Src:       net.ParseIP(d.routerId),
-		Gw:        nexthop,
+		Dst: dst,
+		Src: net.ParseIP(d.routerId),
+		Gw:  nexthop,
 	}
 	routes, _ := netlink.RouteList(nil, netlink.FAMILY_V4)
 	for _, route := range routes {
