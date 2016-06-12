@@ -101,7 +101,11 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	}
 	routes, _ := netlink.RouteList(nil, netlink.FAMILY_V4)
 	for _, route := range routes {
-		if route.Dst != nil && route.Dst.String() == dst.String() {
+		d := "0.0.0.0/0"
+		if route.Dst != nil {
+			d = route.Dst.String()
+		}
+		if d == dst.String() {
 			err := netlink.RouteDel(&route)
 			if err != nil {
 				return err
