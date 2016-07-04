@@ -33,7 +33,7 @@ def install_docker_and_tools():
     local('sh -c "echo deb https://get.docker.io/ubuntu docker main > /etc/apt/sources.list.d/docker.list"',
           capture=True)
     local("apt-get update", capture=True)
-    local("apt-get install lxc-docker-1.3.2 bridge-utils", capture=True)
+    local("apt-get install lxc-docker bridge-utils", capture=True)
     local("ln -sf /usr/bin/docker.io /usr/local/bin/docker", capture=True)
     local("gpasswd -a `whoami` docker", capture=True)
     local("wget https://raw.github.com/jpetazzo/pipework/master/pipework -O /usr/local/bin/pipework",
@@ -335,10 +335,10 @@ if __name__ == '__main__':
             sys.exit(0)
         elif args[0] == 'clean':
             for ctn in get_containers():
-                if ctn[0] == 'h' or ctn[0] == 'g':
+                if ctn[0] == 'g':
                     local("docker rm -f {0}".format(ctn), capture=True)
 
-            for i in range(7):
+            for i in range(3):
                 name = "br0" + str(i+1)
                 local("ip link set down dev {0}".format(name), capture=True)
                 local("ip link delete {0} type bridge".format(name), capture=True)

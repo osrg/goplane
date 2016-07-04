@@ -4,7 +4,7 @@ goplane iptables/flowspec demo
 This demo shows remote ACL configuration using [BGP/FLOWSPEC](https://tools.ietf.org/html/rfc5575) and iptables.
 
 ## How to run
-you only need to type 3 commands to play (tested in Ubuntu trusty).
+you only need to type 3 commands to play (tested in Ubuntu trusty and xenial).
 
 1. install dependent python package to run demo.py
 
