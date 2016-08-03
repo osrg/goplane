@@ -3,14 +3,14 @@ import:
 - package: github.com/Sirupsen/logrus
   subpackages:
   - hooks/syslog
+- package: github.com/coreos/go-iptables
+  subpackages:
+  - iptables
 - package: github.com/jessevdk/go-flags
 - package: github.com/osrg/gobgp
-  ref: c96b6d119849677aa8db8298a412f7ff501b879a
   subpackages:
   - api
-  - config
-  - packet
-  - server
+  - packet/bgp
 - package: github.com/spf13/viper
 - package: github.com/vishvananda/netlink
   subpackages:
