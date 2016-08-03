@@ -1,0 +1,8 @@
+language: go
+
+go:
+  - 1.5
+  - 1.6
+  - tip
+
+go_import_path: github.com/osrg/goplane

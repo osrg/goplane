@@ -1,5 +1,7 @@
 # GoPlane
 
+[![Build Status](https://travis-ci.org/osrg/goplane.svg?branch=master)](https://travis-ci.org/osrg/goplane/builds)
+
 GoPlane is an agent for configuring linux network stack via [GoBGP](https://github.com/osrg/gobgp)
 
 ```
