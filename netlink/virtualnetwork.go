@@ -225,15 +225,8 @@ func (n *VirtualNetwork) Serve() error {
 	n.t.Go(n.monitorNetlink)
 
 	for _, member := range n.config.SniffInterfaces {
-		log.Debugf("start sniff %s", member)
-		_, fd, err := PFPacketBind(member)
-		if err != nil {
-			log.Errorf("failed to sniff %s", member)
-			return err
-		}
-
 		n.t.Go(func() error {
-			return n.sniffPkt(fd)
+			return n.sniffPkt(member)
 		})
 	}
 
@@ -547,18 +540,23 @@ func (n *VirtualNetwork) monitorBest() error {
 	}
 }
 
-func (f *VirtualNetwork) sniffPkt(fd int) error {
+func (f *VirtualNetwork) sniffPkt(ifname string) error {
+	conn, err := NewPFConn(ifname)
+	if err != nil {
+		return err
+	}
+	buf := make([]byte, 2048)
 	for {
-		buf, err := PFPacketRecv(fd)
+		n, err := conn.Read(buf)
 		if err != nil {
-			log.Errorf("failed to recv from %s", fd)
+			log.Errorf("failed to recv from %s, err: %s", conn, err)
 			return err
 		}
 		log.WithFields(log.Fields{
 			"Topic": "VirtualNetwork",
 			"Etag":  f.config.Etag,
-		}).Debugf("recv from %s, len: %d", fd, len(buf))
-		f.floodCh <- buf
+		}).Debugf("recv from %s, len: %d", conn, n)
+		f.floodCh <- buf[:n]
 	}
 }
 
