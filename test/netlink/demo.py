@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2015 Nippon Telegraph and Telephone Corporation.
+# Copyright (C) 2015,2016 Nippon Telegraph and Telephone Corporation.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,48 +14,44 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from fabric.context_managers import shell_env
-from fabric.api import local
-from fabric import colors
-from optparse import OptionParser
-import netaddr
-import toml
-import itertools
 import os
 import sys
+import itertools
+import string
+import random
+from optparse import OptionParser
+
+import netaddr
+import toml
+from pyroute2 import IPRoute
+from docker import Client
+from nsenter import Namespace
 
 TEST_BASE_DIR = '/tmp/goplane'
 
-def install_docker_and_tools():
-    print "start install packages of test environment."
-    local("apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys "
-          "36A1D7869245C8950F966E92D8576A8BA88D21E9", capture=True)
-    local('sh -c "echo deb https://get.docker.io/ubuntu docker main > /etc/apt/sources.list.d/docker.list"',
-          capture=True)
-    local("apt-get update", capture=True)
-    local("apt-get install -y --force-yes lxc-docker bridge-utils", capture=True)
-    local("ln -sf /usr/bin/docker.io /usr/local/bin/docker", capture=True)
-    local("gpasswd -a `whoami` docker", capture=True)
-    local("wget https://raw.github.com/jpetazzo/pipework/master/pipework -O /usr/local/bin/pipework",
-          capture=True)
-    local("chmod 755 /usr/local/bin/pipework", capture=True)
-    local("docker pull osrg/gobgp", capture=True)
-    update_goplane()
+dckr = Client()
 
-def update_goplane():
-    local("cp Dockerfile ../../../")
-    local("cd ../../../ && docker build --no-cache -t goplane . && rm Dockerfile")
+flatten = lambda l: itertools.chain.from_iterable(l)
+random_str = lambda n : ''.join([random.choice(string.ascii_letters + string.digits) for i in range(n)])
+get_containers = lambda : [str(x)[1:] for x in list(flatten(n['Names'] for n in dckr.containers(all=True)))]
 
-def get_bridges():
-    return local("brctl show | awk 'NR > 1{print $1}'",
-                 capture=True).split('\n')
+class docker_netns(object):
+    def __init__(self, name):
+        pid = int(dckr.inspect_container(name)['State']['Pid'])
+        if pid == 0:
+            raise Exception('no container named {0}'.format(name))
+        self.pid = pid
 
+    def __enter__(self):
+        pid = self.pid
+        if not os.path.exists('/var/run/netns'):
+            os.mkdir('/var/run/netns')
+        os.symlink('/proc/{0}/ns/net'.format(pid), '/var/run/netns/{0}'.format(pid))
+        return str(pid)
 
-def get_containers():
-    output = local("docker ps -a | awk 'NR > 1 {print $NF}'", capture=True)
-    if output == '':
-        return []
-    return output.split('\n')
+    def __exit__(self, type, value, traceback):
+        pid = self.pid
+        os.unlink('/var/run/netns/{0}'.format(pid))
 
 
 class CmdBuffer(list):
@@ -72,8 +68,15 @@ class CmdBuffer(list):
 
 class Bridge(object):
     def __init__(self, name, subnet='', with_ip=True):
-        self.name = name
-        self.with_ip = with_ip
+        ip = IPRoute()
+        br = ip.link_lookup(ifname=name)
+        if len(br) != 0:
+            ip.link('del', index=br[0])
+        ip.link_create(ifname=name, kind='bridge')
+        br = ip.link_lookup(ifname=name)
+        br = br[0]
+        ip.link('set', index=br, state='up')
+
         if with_ip:
             self.subnet = netaddr.IPNetwork(subnet)
 
@@ -83,39 +86,52 @@ class Bridge(object):
             self._ip_generator = f()
             # throw away first network address
             self.next_ip_address()
-
-        if self.name in get_bridges():
-            self.delete()
-
-        local("ip link add {0} type bridge".format(self.name), capture=True)
-        local("ip link set up dev {0}".format(self.name), capture=True)
-
-        if with_ip:
             self.ip_addr = self.next_ip_address()
-            local("ip addr add {0} dev {1}".format(self.ip_addr, self.name),
-                  capture=True)
+            address, prefixlen = self.ip_addr.split('/')
+            ip.addr('add', index=br, address=address, prefixlen=int(prefixlen))
 
+        self.name = name
+        self.with_ip = with_ip
+        self.br = br
         self.ctns = []
 
     def next_ip_address(self):
         return "{0}/{1}".format(self._ip_generator.next(),
                                 self.subnet.prefixlen)
 
-    def addif(self, ctn, name='', mac=''):
-        if name == '':
-            name = self.name
-        self.ctns.append(ctn)
-        if self.with_ip:
-            ctn.pipework(self, self.next_ip_address(), name)
-        else:
-            ctn.pipework(self, '0/0', name)
+    def addif(self, ctn, ifname='', mac=''):
+        with docker_netns(ctn.name) as pid:
+            host_ifname = '{0}_{1}'.format(self.name, ctn.name)
+            guest_ifname = random_str(5)
+            ip = IPRoute()
+            ip.link_create(ifname=host_ifname, kind='veth', peer=guest_ifname)
+            host = ip.link_lookup(ifname=host_ifname)[0]
+            ip.link('set', index=host, master=self.br)
+            ip.link('set', index=host, state='up')
 
-        if mac != '':
-            ctn.local("ip link set addr {0} dev {1}".format(mac, name))
+            self.ctns.append(ctn)
 
-    def delete(self):
-        local("ip link set down dev {0}".format(self.name), capture=True)
-        local("ip link delete {0} type bridge".format(self.name), capture=True)
+            guest = ip.link_lookup(ifname=guest_ifname)[0]
+            ip.link('set', index=guest, net_ns_fd=pid)
+            with Namespace(pid, 'net'):
+                ip = IPRoute()
+                if ifname == '':
+                    links = [x.get_attr('IFLA_IFNAME') for x in ip.get_links()]
+                    n = [int(l[len('eth'):]) for l in links if l.startswith('eth')]
+                    idx = 0
+                    if len(n) > 0:
+                        idx = max(n) + 1
+                    ifname = 'eth{0}'.format(idx)
+                ip.link('set', index=guest, ifname=ifname)
+                ip.link('set', index=guest, state='up')
+
+                if mac != '':
+                    ip.link('set', index=guest, address=mac)
+
+                if self.with_ip:
+                    address, mask = self.next_ip_address().split('/')
+                    ip.addr('add', index=guest, address=address, mask=int(mask))
+                    ctn.ip_addrs.append((ifname, address, self.name))
 
 
 class Container(object):
@@ -126,43 +142,31 @@ class Container(object):
         self.ip_addrs = []
         self.is_running = False
 
+    def run(self):
         if self.name in get_containers():
             self.stop()
-
-    def run(self):
-        c = CmdBuffer(' ')
-        c << "docker run --privileged=true --net=none"
-        for sv in self.shared_volumes:
-            c << "-v {0}:{1}".format(sv[0], sv[1])
-        c << "--name {0} -id {1}".format(self.name, self.image)
-
-        self.id = local(str(c), capture=True)
+        binds = ['{0}:{1}'.format(os.path.abspath(sv[0]), sv[1]) for sv in self.shared_volumes]
+        config = dckr.create_host_config(binds=binds, privileged=True)
+        ctn = dckr.create_container(image=self.image, detach=True, name=self.name,
+                                    stdin_open=True, volumes=[sv[1] for sv in self.shared_volumes],
+                                    host_config=config, network_disabled=True)
+        dckr.start(container=self.name)
+        self.id = ctn['Id']
         self.is_running = True
-        self.local("ip li set up dev lo")
-        return 0
+        with docker_netns(self.name) as pid:
+            with Namespace(pid, 'net'):
+                ip = IPRoute()
+                lo = ip.link_lookup(ifname='lo')[0]
+                ip.link('set', index=lo, state='up')
+
 
     def stop(self):
-        ret = local("docker rm -f " + self.name, capture=True)
+        dckr.remove_container(container=self.name, force=True)
         self.is_running = False
-        return ret
 
-    def pipework(self, bridge, ip_addr, intf_name=""):
-        if not self.is_running:
-            print colors.yellow('call run() before pipeworking')
-            return
-        c = CmdBuffer(' ')
-        c << "pipework {0}".format(bridge.name)
-
-        if intf_name != "":
-            c << "-i {0}".format(intf_name)
-        else:
-            intf_name = "eth1"
-        c << "{0} {1}".format(self.name, ip_addr)
-        self.ip_addrs.append((intf_name, ip_addr, bridge))
-        return local(str(c), capture=True)
-
-    def local(self, cmd):
-        return local("docker exec -it {0} {1}".format(self.name, cmd))
+    def local(self, cmd, stream=False, detach=False):
+        i = dckr.exec_create(container=self.name, cmd=cmd)
+        return dckr.exec_start(i['Id'], tty=True, stream=stream, detach=detach)
 
 
 class BGPContainer(Container):
@@ -172,8 +176,9 @@ class BGPContainer(Container):
 
     def __init__(self, name, asn, router_id, ctn_image_name):
         self.config_dir = "{0}/{1}".format(TEST_BASE_DIR, name)
-        local('if [ -e {0} ]; then rm -r {0}; fi'.format(self.config_dir))
-        local('mkdir -p {0}'.format(self.config_dir))
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+            os.chmod(self.config_dir, 0777)
         self.asn = asn
         self.router_id = router_id
         self.peers = {}
@@ -234,27 +239,22 @@ class GoPlaneContainer(BGPContainer):
         self.log_level = 'debug'
 
     def start_goplane(self):
-        c = CmdBuffer()
-        c << '#!/bin/bash'
-        c << 'gobgpd -f {0}/gobgpd.conf -l {1} -p > ' \
-             '{0}/gobgpd.log 2>&1'.format(self.SHARED_VOLUME, self.log_level)
-        cmd = 'echo "{0:s}" > {1}/start_gobgp.sh'.format(c, self.config_dir)
-        local(cmd, capture=True)
-        cmd = "chmod 755 {0}/start_gobgp.sh".format(self.config_dir)
-        local(cmd, capture=True)
-        cmd = 'docker exec -d {0} {1}/start_gobgp.sh'.format(self.name,
-                                                             self.SHARED_VOLUME)
-        local(cmd, capture=True)
+        name = '{0}/start_gobgp.sh'.format(self.config_dir)
+        with open(name, 'w') as f:
+            f.write('''#!/bin/bash
+gobgpd -f {0}/gobgpd.conf -l {1} -p > {0}/gobgpd.log 2>&1
+'''.format(self.SHARED_VOLUME, self.log_level))
+        os.chmod(name, 0755)
+        self.local('{0}/start_gobgp.sh'.format(self.SHARED_VOLUME), detach=True)
 
-        c << 'goplaned -f {0}/goplaned.conf -l {1} -p > ' \
-             '{0}/goplaned.log 2>&1'.format(self.SHARED_VOLUME, self.log_level)
-        cmd = 'echo "{0:s}" > {1}/start_goplane.sh'.format(c, self.config_dir)
-        local(cmd, capture=True)
-        cmd = "chmod 755 {0}/start_goplane.sh".format(self.config_dir)
-        local(cmd, capture=True)
-        cmd = 'docker exec -d {0} {1}/start_goplane.sh'.format(self.name,
-                                                               self.SHARED_VOLUME)
-        local(cmd, capture=True)
+        name = '{0}/start_goplane.sh'.format(self.config_dir)
+        with open(name, 'w') as f:
+            f.write('''#!/bin/bash
+goplaned -f {0}/goplaned.conf -l {1} -p > {0}/goplaned.log 2>&1
+'''.format(self.SHARED_VOLUME, self.log_level))
+        os.chmod(name, 0755)
+        self.local('{0}/start_goplane.sh'.format(self.SHARED_VOLUME), detach=True)
+
 
     def run(self):
         super(GoPlaneContainer, self).run()
@@ -274,7 +274,6 @@ class GoPlaneContainer(BGPContainer):
         config = {'dataplane': dplane_config}
 
         with open('{0}/goplaned.conf'.format(self.config_dir), 'w') as f:
-            print colors.yellow(toml.dumps(config))
             f.write(toml.dumps(config))
 
     def create_gobgp_config(self):
@@ -298,7 +297,7 @@ class GoPlaneContainer(BGPContainer):
                 afi_safi_list.append({'config': {'afi-safi-name': 'l2vpn-evpn'}})
 
             n = {'config': {
-                    'neighbor-address': info['neigh_addr'].split('/')[0],
+                    'neighbor-address': info['neigh_addr'],
                     'peer-as': peer.asn,
                     'local-as': self.asn,
                     'auth-password': info['passwd'],
@@ -318,7 +317,6 @@ class GoPlaneContainer(BGPContainer):
             config['neighbors'].append(n)
 
         with open('{0}/gobgpd.conf'.format(self.config_dir), 'w') as f:
-            print colors.yellow(toml.dumps(config))
             f.write(toml.dumps(config))
 
     def create_config(self):
@@ -326,10 +324,8 @@ class GoPlaneContainer(BGPContainer):
         self.create_goplane_config()
 
     def reload_config(self):
-        cmd = 'docker exec {0} /usr/bin/pkill gobgpd -SIGHUP'.format(self.name)
-        local(cmd, capture=True)
-        cmd = 'docker exec {0} /usr/bin/pkill goplaned -SIGHUP'.format(self.name)
-        local(cmd, capture=True)
+        self.local('/usr/bin/pkill gobgpd -SIGHUP')
+        self.local('/usr/bin/pkill goplaned -SIGHUP')
 
     def add_vn(self, vni, vtep, color, member, vxlan_port=8472):
         self.vns.append({'vni':vni, 'vtep':vtep, 'vxlan_port':vxlan_port,
@@ -338,7 +334,7 @@ class GoPlaneContainer(BGPContainer):
 
 if __name__ == '__main__':
 
-    parser = OptionParser(usage="usage: %prog [prepare|update|clean]")
+    parser = OptionParser(usage="usage: %prog [clean]")
     options, args = parser.parse_args()
 
     os.chdir(os.path.abspath(os.path.dirname(__file__)))
@@ -348,25 +344,22 @@ if __name__ == '__main__':
         sys.exit(1)
 
     if len(args) > 0:
-        if args[0] == 'prepare':
-            install_docker_and_tools()
-            sys.exit(0)
-        elif args[0] == 'update':
-            update_goplane()
-            sys.exit(0)
-        elif args[0] == 'clean':
+        if args[0] == 'clean':
             for ctn in get_containers():
                 if ctn[0] == 'h' or ctn[0] == 'j' or ctn[0] == 'g':
-                    local("docker rm -f {0}".format(ctn), capture=True)
+                    print 'remove container {0}'.format(ctn)
+                    dckr.remove_container(container=ctn, force=True)
 
+            ip = IPRoute()
             for i in range(7):
                 name = "br0" + str(i+1)
-                local("ip link set down dev {0}".format(name), capture=True)
-                local("ip link delete {0} type bridge".format(name), capture=True)
-
+                brs = ip.link_lookup(ifname=name)
+                for br in brs:
+                    print 'delete link {0}'.format(name)
+                    ip.link('del', index=br)
             sys.exit(0)
         else:
-            print "usage: demo.py [prepare|update|clean]"
+            print "usage: demo.py [clean]"
             sys.exit(1)
 
     h1 = Container(name='h1', image='osrg/gobgp')

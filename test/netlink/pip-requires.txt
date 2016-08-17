@@ -1,3 +1,5 @@
 toml
-fabric
 netaddr
+docker-py
+nsenter
+pyroute2
