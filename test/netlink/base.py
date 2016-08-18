@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright (C) 2015,2016 Nippon Telegraph and Telephone Corporation.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +18,7 @@ import sys
 import itertools
 import string
 import random
-from optparse import OptionParser
+import time
 
 import netaddr
 import toml
@@ -54,25 +53,13 @@ class docker_netns(object):
         os.unlink('/var/run/netns/{0}'.format(pid))
 
 
-class CmdBuffer(list):
-    def __init__(self, delim='\n'):
-        super(CmdBuffer, self).__init__()
-        self.delim = delim
-
-    def __lshift__(self, value):
-        self.append(value)
-
-    def __str__(self):
-        return self.delim.join(self)
-
-
 class Bridge(object):
     def __init__(self, name, subnet='', with_ip=True):
         ip = IPRoute()
         br = ip.link_lookup(ifname=name)
         if len(br) != 0:
             ip.link('del', index=br[0])
-        ip.link_create(ifname=name, kind='bridge')
+        ip.link('add', ifname=name, kind='bridge')
         br = ip.link_lookup(ifname=name)
         br = br[0]
         ip.link('set', index=br, state='up')
@@ -104,7 +91,7 @@ class Bridge(object):
             host_ifname = '{0}_{1}'.format(self.name, ctn.name)
             guest_ifname = random_str(5)
             ip = IPRoute()
-            ip.link_create(ifname=host_ifname, kind='veth', peer=guest_ifname)
+            ip.link('add', ifname=host_ifname, kind='veth', peer=guest_ifname)
             host = ip.link_lookup(ifname=host_ifname)[0]
             ip.link('set', index=host, master=self.br)
             ip.link('set', index=host, state='up')
@@ -162,6 +149,7 @@ class Container(object):
 
     def stop(self):
         dckr.remove_container(container=self.name, force=True)
+        time.sleep(2)
         self.is_running = False
 
     def local(self, cmd, stream=False, detach=False):
@@ -230,7 +218,7 @@ class GoPlaneContainer(BGPContainer):
     PEER_TYPE_EXTERNAL = 'external'
     SHARED_VOLUME = '/root/shared_volume'
 
-    def __init__(self, name, asn, router_id, ctn_image_name='goplane',
+    def __init__(self, name, asn, router_id, ctn_image_name='osrg/goplane',
                  log_level='debug'):
         super(GoPlaneContainer, self).__init__(name, asn, router_id,
                                              ctn_image_name)
@@ -246,6 +234,8 @@ gobgpd -f {0}/gobgpd.conf -l {1} -p > {0}/gobgpd.log 2>&1
 '''.format(self.SHARED_VOLUME, self.log_level))
         os.chmod(name, 0755)
         self.local('{0}/start_gobgp.sh'.format(self.SHARED_VOLUME), detach=True)
+
+        time.sleep(1)
 
         name = '{0}/start_goplane.sh'.format(self.config_dir)
         with open(name, 'w') as f:
@@ -330,93 +320,3 @@ goplaned -f {0}/goplaned.conf -l {1} -p > {0}/goplaned.log 2>&1
     def add_vn(self, vni, vtep, color, member, vxlan_port=8472):
         self.vns.append({'vni':vni, 'vtep':vtep, 'vxlan_port':vxlan_port,
                          'color':color, 'member':member})
-
-
-if __name__ == '__main__':
-
-    parser = OptionParser(usage="usage: %prog [clean]")
-    options, args = parser.parse_args()
-
-    os.chdir(os.path.abspath(os.path.dirname(__file__)))
-
-    if os.getegid() != 0:
-        print "execute as root"
-        sys.exit(1)
-
-    if len(args) > 0:
-        if args[0] == 'clean':
-            for ctn in get_containers():
-                if ctn[0] == 'h' or ctn[0] == 'j' or ctn[0] == 'g':
-                    print 'remove container {0}'.format(ctn)
-                    dckr.remove_container(container=ctn, force=True)
-
-            ip = IPRoute()
-            for i in range(7):
-                name = "br0" + str(i+1)
-                brs = ip.link_lookup(ifname=name)
-                for br in brs:
-                    print 'delete link {0}'.format(name)
-                    ip.link('del', index=br)
-            sys.exit(0)
-        else:
-            print "usage: demo.py [clean]"
-            sys.exit(1)
-
-    h1 = Container(name='h1', image='osrg/gobgp')
-    h2 = Container(name='h2', image='osrg/gobgp')
-    h3 = Container(name='h3', image='osrg/gobgp')
-    j1 = Container(name='j1', image='osrg/gobgp')
-    j2 = Container(name='j2', image='osrg/gobgp')
-    j3 = Container(name='j3', image='osrg/gobgp')
-    hs = [h1, h2, h3]
-    js = [j1, j2, j3]
-    hosts = hs + js
-
-    g1 = GoPlaneContainer(name='g1', asn=65000, router_id='192.168.0.1')
-    g2 = GoPlaneContainer(name='g2', asn=65000, router_id='192.168.0.2')
-    g3 = GoPlaneContainer(name='g3', asn=65000, router_id='192.168.0.3')
-    bgps = [g1, g2, g3]
-
-    for idx, ctn in enumerate(bgps):
-        ctn.add_vn(10, 'vtep10', 10, ['eth2'])
-
-    for idx, ctn in enumerate(bgps):
-        ctn.add_vn(20, 'vtep20', 20, ['eth3'])
-
-    ctns = bgps + hosts
-    [ctn.run() for ctn in ctns]
-
-    br01 = Bridge(name='br01', subnet='192.168.10.0/24')
-    [br01.addif(ctn, 'eth1') for ctn in bgps]
-
-    for lfs, rfs in itertools.permutations(bgps, 2):
-        lfs.add_peer(rfs, evpn=True)
-
-    br02 = Bridge(name='br02', with_ip=False)
-    br02.addif(g1, 'eth2')
-    br02.addif(h1, 'eth1', 'aa:aa:aa:aa:aa:01')
-
-    br03 = Bridge(name='br03', with_ip=False)
-    br03.addif(g2, 'eth2')
-    br03.addif(h2, 'eth1', 'aa:aa:aa:aa:aa:02')
-
-    br04 = Bridge(name='br04', with_ip=False)
-    br04.addif(g3, 'eth2')
-    br04.addif(h3, 'eth1', 'aa:aa:aa:aa:aa:03')
-
-    br05 = Bridge(name='br05', with_ip=False)
-    br05.addif(g1, 'eth3')
-    br05.addif(j1, 'eth1', 'aa:aa:aa:aa:aa:01')
-
-    br06 = Bridge(name='br06', with_ip=False)
-    br06.addif(g2, 'eth3')
-    br06.addif(j2, 'eth1', 'aa:aa:aa:aa:aa:02')
-
-    br07 = Bridge(name='br07', with_ip=False)
-    br07.addif(g3, 'eth3')
-    br07.addif(j3, 'eth1', 'aa:aa:aa:aa:aa:03')
-
-    [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(hs)]
-    [ctn.local("ip a add 10.10.10.{0}/24 dev eth1".format(i+1)) for i, ctn in enumerate(js)]
-
-    [ctn.start_goplane() for ctn in bgps]
