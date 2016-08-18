@@ -90,11 +90,23 @@ class Test(unittest.TestCase):
 
     def test_01_neighbor_established(self):
         for i in range(20):
-            if all(v['info']['bgp_state'] == 'BGP_FSM_ESTABLISHED' for v in json.loads(self.ctns['g1'].local('gobgp n -j'))):
+            if all(v['info']['bgp_state'] == 'BGP_FSM_ESTABLISHED' for v in json.loads(self.ctns['g1'].local('gobgp neighbor -j'))):
                     logging.debug('all peers got established')
                     return
             time.sleep(1)
         raise Exception('timeout')
+
+    def test_02_ping_check(self):
+        for i in range(10):
+            out = self.ctns['h1'].local("bash -c 'ping -c 1 10.10.10.3 2>&1 > /dev/null && echo true || echo false'").strip()
+            if out == 'true':
+                logging.debug('ping reachable')
+                return
+            time.sleep(1)
+        raise Exception('timeout')
+
+    def test_03_show_evpn_bgp_table(self):
+        logging.debug(self.ctns['g1'].local('gobgp global rib -a evpn'))
 
 if __name__ == '__main__':
     if os.geteuid() is not 0:

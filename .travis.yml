@@ -1,19 +1,19 @@
 language: go
 
 matrix:
-    allow_failures:
-    - go: tip
-    include:
-    - go: 1.5
-    - go: 1.6
-    - go: 1.7
-    - go: tip
-    - go: 1.7
-      sudo: required
-      env: TEST=test/netlink/evpn_vxlan_test.py
-      services:
-      - docker
+  allow_failures:
+  - go: tip
+  include:
+  - go: 1.5
+  - go: 1.6
+  - go: 1.7
+  - go: tip
+  - go: 1.7
+    sudo: required
+    env:
+    - TEST=test/netlink/evpn_vxlan_test.py
+    services:
+    - docker
+    script: test/travis_script.sh
 
 go_import_path: github.com/osrg/goplane
-
-script: test/travis_script.sh $TEST
