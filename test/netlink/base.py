@@ -240,7 +240,7 @@ gobgpd -f {0}/gobgpd.conf -l {1} -p > {0}/gobgpd.log 2>&1
         name = '{0}/start_goplane.sh'.format(self.config_dir)
         with open(name, 'w') as f:
             f.write('''#!/bin/bash
-goplaned -f {0}/goplaned.conf -l {1} -p > {0}/goplaned.log 2>&1
+goplane -f {0}/goplane.conf -l {1} -p > {0}/goplane.log 2>&1
 '''.format(self.SHARED_VOLUME, self.log_level))
         os.chmod(name, 0755)
         self.local('{0}/start_goplane.sh'.format(self.SHARED_VOLUME), detach=True)
@@ -263,7 +263,7 @@ goplaned -f {0}/goplaned.conf -l {1} -p > {0}/goplaned.log 2>&1
 
         config = {'dataplane': dplane_config}
 
-        with open('{0}/goplaned.conf'.format(self.config_dir), 'w') as f:
+        with open('{0}/goplane.conf'.format(self.config_dir), 'w') as f:
             f.write(toml.dumps(config))
 
     def create_gobgp_config(self):
@@ -315,7 +315,7 @@ goplaned -f {0}/goplaned.conf -l {1} -p > {0}/goplaned.log 2>&1
 
     def reload_config(self):
         self.local('/usr/bin/pkill gobgpd -SIGHUP')
-        self.local('/usr/bin/pkill goplaned -SIGHUP')
+        self.local('/usr/bin/pkill goplane -SIGHUP')
 
     def add_vn(self, vni, vtep, color, member, vxlan_port=8472):
         self.vns.append({'vni':vni, 'vtep':vtep, 'vxlan_port':vxlan_port,

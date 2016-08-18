@@ -3,7 +3,7 @@
 if [ $# -eq 0 ]; then
     echo "execute unit test"
     go version
-    go test -v ./...
+    go build
     exit $?
 fi
 
