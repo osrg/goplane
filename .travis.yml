@@ -1,25 +1,18 @@
 language: go
 
-sudo: required
-services:
-- docker
-
-go:
-- 1.5
-- 1.6
-- 1.7
-- tip
-
 matrix:
     allow_failures:
     - go: tip
     include:
-        - go: 1.5
-        - go: 1.6
-        - go: 1.7
-        - go: tip
-        - go: 1.7
-          env: TEST=test/netlink/evpn_vxlan_test.py
+    - go: 1.5
+    - go: 1.6
+    - go: 1.7
+    - go: tip
+    - go: 1.7
+      sudo: required
+      env: TEST=test/netlink/evpn_vxlan_test.py
+      services:
+      - docker
 
 go_import_path: github.com/osrg/goplane
 
