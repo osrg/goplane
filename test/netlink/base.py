@@ -267,7 +267,8 @@ goplane -f {0}/goplane.conf -l {1} -p > {0}/goplane.log 2>&1
             f.write(toml.dumps(config))
 
     def create_gobgp_config(self):
-        config = {'global': {'config': {'as': self.asn, 'router-id': self.router_id}}}
+        config = {'global': {'config': {'as': self.asn, 'router-id': self.router_id},
+                             'use-multiple-paths': {'config': {'enabled': True}}}}
         for peer, info in self.peers.iteritems():
             if self.asn == peer.asn:
                 peer_type = self.PEER_TYPE_INTERNAL

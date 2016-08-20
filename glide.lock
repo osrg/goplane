@@ -1,5 +1,5 @@
-hash: cb21b6fc1dd5e578ea3102d76e7897de9db1f9146d1e45f3b90d71d9cd1c2076
-updated: 2016-08-16T09:36:13.872050223Z
+hash: 2d7c677b98bc7dc2b5bb4d66e6128ac39f89a920ef1a53079bfdd5054858d5f1
+updated: 2016-08-21T08:58:55.398121675Z
 imports:
 - name: github.com/armon/go-radix
   version: 4239b77079c7b5d1243b7b4736304ce8ddb6f0f2
@@ -24,10 +24,10 @@ imports:
   subpackages:
   - hcl/ast
   - hcl/parser
-  - hcl/scanner
-  - hcl/strconv
   - hcl/token
   - json/parser
+  - hcl/scanner
+  - hcl/strconv
   - json/scanner
   - json/token
 - name: github.com/influxdata/influxdb
@@ -45,16 +45,18 @@ imports:
 - name: github.com/mitchellh/mapstructure
   version: ca63d7c062ee3c9f34db231e352b60012b4fd0c1
 - name: github.com/osrg/gobgp
-  version: 477b035bf4c053980f6e43cf446847a63d4bb010
+  version: b7caacf731d24793ef4eb9f1dbfb9846da7543d4
+  repo: https://github.com/ishidawataru/gobgp.git
+  vcs: git
   subpackages:
   - api
-  - config
   - packet/bgp
-  - packet/bmp
-  - packet/mrt
-  - packet/rtr
-  - server
   - table
+  - config
+  - server
+  - packet/bmp
+  - packet/rtr
+  - packet/mrt
   - zebra
 - name: github.com/pkg/errors
   version: a22138067af1c4942683050411a841ade67fe1eb
@@ -80,7 +82,9 @@ imports:
 - name: github.com/spf13/viper
   version: 654fc7bb54d0c138ef80405ff577391f79c0c32d
 - name: github.com/vishvananda/netlink
-  version: 49a735373919c4c9a53aff1f9f63da73a243f32d
+  version: c8f52d3ce540d01222effb9c36c0510ff86b1494
+  repo: https://github.com/hash-set/netlink.git
+  vcs: git
   subpackages:
   - nl
 - name: github.com/vishvananda/netns
@@ -88,17 +92,17 @@ imports:
 - name: golang.org/x/crypto
   version: c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6
   subpackages:
-  - curve25519
   - ssh
+  - curve25519
 - name: golang.org/x/net
   version: 07b51741c1d6423d4a6abab1c49940ec09cb1aaf
   subpackages:
   - context
   - http2
-  - http2/hpack
-  - internal/timeseries
-  - lex/httplex
   - trace
+  - http2/hpack
+  - lex/httplex
+  - internal/timeseries
 - name: golang.org/x/sys
   version: a646d33e2ee3172a661fc09bca23bb4889a41bc8
   subpackages:
@@ -117,8 +121,8 @@ imports:
   - internal
   - metadata
   - naming
-  - peer
   - transport
+  - peer
 - name: gopkg.in/tomb.v2
   version: 14b3d72120e8d10ea6e6b7f87f7175734b1faab8
 - name: gopkg.in/yaml.v2

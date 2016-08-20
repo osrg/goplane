@@ -23,6 +23,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	api "github.com/osrg/gobgp/api"
 	"github.com/osrg/gobgp/packet/bgp"
+	"github.com/osrg/gobgp/table"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/net/context"
@@ -33,71 +34,60 @@ import (
 type Dataplane struct {
 	t         tomb.Tomb
 	config    *config.Config
-	modRibCh  chan *api.Path
-	advPathCh chan *api.Path
+	modRibCh  chan []*table.Path
+	advPathCh chan *table.Path
 	vnMap     map[string]*VirtualNetwork
 	addVnCh   chan config.VirtualNetwork
 	delVnCh   chan config.VirtualNetwork
 	grpcHost  string
 	client    api.GobgpApiClient
 	routerId  string
+	localAS   uint32
 }
 
-func (d *Dataplane) advPath(p *api.Path) error {
+func (d *Dataplane) advPath(p *table.Path) error {
 	arg := &api.AddPathRequest{
 		Resource: api.Resource_GLOBAL,
-		Path:     p,
+		Path:     api.ToPathApi(p),
 	}
 	_, err := d.client.AddPath(context.Background(), arg)
 	return err
 }
 
-func (d *Dataplane) modRib(p *api.Path) error {
-	var nlri bgp.AddrPrefixInterface
-	var nexthop net.IP
-
-	if len(p.Nlri) > 0 {
-		nlri = &bgp.IPAddrPrefix{}
-		err := nlri.DecodeFromBytes(p.Nlri)
-		if err != nil {
-			return err
-		}
-	}
-
-	for _, attr := range p.Pattrs {
-		p, err := bgp.GetPathAttribute(attr)
-		if err != nil {
-			return err
-		}
-
-		err = p.DecodeFromBytes(attr)
-		if err != nil {
-			return err
-		}
-
-		switch p.GetType() {
-		case bgp.BGP_ATTR_TYPE_NEXT_HOP:
-			n := p.(*bgp.PathAttributeNextHop)
-			nexthop = n.Value
-		case bgp.BGP_ATTR_TYPE_MP_REACH_NLRI:
-			mpreach := p.(*bgp.PathAttributeMpReachNLRI)
-			if len(mpreach.Value) != 1 {
-				return fmt.Errorf("include only one route in mp_reach_nlri")
-			}
-			nlri = mpreach.Value[0]
-			nexthop = mpreach.Nexthop
-		}
-	}
-
-	if nexthop.String() == "0.0.0.0" {
+func (d *Dataplane) modRib(paths []*table.Path) error {
+	if len(paths) == 0 {
 		return nil
 	}
+	p := paths[0]
+	nexthop := p.GetNexthop()
 
-	dst, _ := netlink.ParseIPNet(nlri.String())
+	dst, _ := netlink.ParseIPNet(p.GetNlri().String())
 	route := &netlink.Route{
 		Dst: dst,
 		Src: net.ParseIP(d.routerId),
-		Gw:  nexthop,
+	}
+
+	log.Info("paths:", paths)
+
+	if len(paths) == 1 {
+		if p.IsLocal() {
+			return nil
+		}
+		route.Gw = nexthop
+	} else {
+		mp := make([]*netlink.NexthopInfo, 0, len(paths))
+		for _, path := range paths {
+			if path.IsLocal() {
+				continue
+			}
+			mp = append(mp, &netlink.NexthopInfo{
+				Gw: path.GetNexthop(),
+			})
+		}
+		if len(mp) == 0 {
+			return nil
+		}
+		route.MultiPath = mp
 	}
 	routes, _ := netlink.RouteList(nil, netlink.FAMILY_V4)
 	for _, route := range routes {
@@ -106,6 +96,7 @@ func (d *Dataplane) modRib(p *api.Path) error {
 			d = route.Dst.String()
 		}
 		if d == dst.String() {
+			log.Info("del route:", route)
 			err := netlink.RouteDel(&route)
 			if err != nil {
 				return err
@@ -115,10 +106,16 @@ func (d *Dataplane) modRib(p *api.Path) error {
 	if p.IsWithdraw {
 		return nil
 	}
+	log.Info("add route:", route)
 	return netlink.RouteAdd(route)
 }
 
 func (d *Dataplane) monitorBest() error {
+
+	option := api.ToNativeOption{
+		LocalAS: d.localAS,
+		LocalID: net.ParseIP(d.routerId),
+	}
 
 	err := func() error {
 		rsp, err := d.client.GetRib(context.Background(), &api.GetRibRequest{
@@ -132,12 +129,12 @@ func (d *Dataplane) monitorBest() error {
 		}
 		rib := rsp.Table
 		for _, dst := range rib.Destinations {
-			for _, p := range dst.Paths {
-				if p.Best {
-					d.modRibCh <- p
-					break
-				}
+			res, err := dst.ToNativeDestination(option)
+			if err != nil {
+				return err
 			}
+			bdst := res.Select(table.DestinationSelectOption{Best: true, MultiPath: true})
+			d.modRibCh <- bdst.GetAllKnownPathList()
 		}
 		return nil
 	}()
@@ -155,11 +152,15 @@ func (d *Dataplane) monitorBest() error {
 		return err
 	}
 	for {
-		dst, err := stream.Recv()
+		res, err := stream.Recv()
 		if err != nil {
 			return err
 		}
-		d.modRibCh <- dst.Paths[0]
+		dst, err := res.ToNativeDestination(option)
+		if err != nil {
+			return err
+		}
+		d.modRibCh <- dst.GetAllKnownPathList()
 	}
 	return nil
 }
@@ -176,6 +177,7 @@ func (d *Dataplane) Serve() error {
 		return err
 	}
 	d.routerId = rsp.Global.RouterId
+	d.localAS = rsp.Global.As
 
 	lo, err := netlink.LinkByName("lo")
 	if err != nil {
@@ -207,16 +209,10 @@ func (d *Dataplane) Serve() error {
 		}
 	}
 
-	path := &api.Path{
-		Pattrs: make([][]byte, 0),
-	}
-	path.Nlri, _ = bgp.NewIPAddrPrefix(uint8(32), d.routerId).Serialize()
-	n, _ := bgp.NewPathAttributeNextHop("0.0.0.0").Serialize()
-	path.Pattrs = append(path.Pattrs, n)
-	origin, _ := bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP).Serialize()
-	path.Pattrs = append(path.Pattrs, origin)
-
-	d.advPathCh <- path
+	d.advPathCh <- table.NewPath(nil, bgp.NewIPAddrPrefix(uint8(32), d.routerId), false, []bgp.PathAttributeInterface{
+		bgp.NewPathAttributeNextHop("0.0.0.0"),
+		bgp.NewPathAttributeOrigin(bgp.BGP_ORIGIN_ATTR_TYPE_IGP),
+	}, time.Now(), false)
 	d.t.Go(d.monitorBest)
 
 	for {
@@ -224,8 +220,8 @@ func (d *Dataplane) Serve() error {
 		case <-d.t.Dying():
 			log.Error("dying! ", d.t.Err())
 			return nil
-		case p := <-d.modRibCh:
-			err = d.modRib(p)
+		case paths := <-d.modRibCh:
+			err = d.modRib(paths)
 			if err != nil {
 				log.Error("failed to mod rib: ", err)
 			}
@@ -257,8 +253,8 @@ func (d *Dataplane) DeleteVirtualNetwork(c config.VirtualNetwork) error {
 }
 
 func NewDataplane(c *config.Config, grpcHost string) *Dataplane {
-	modRibCh := make(chan *api.Path, 16)
-	advPathCh := make(chan *api.Path, 16)
+	modRibCh := make(chan []*table.Path, 16)
+	advPathCh := make(chan *table.Path, 16)
 	addVnCh := make(chan config.VirtualNetwork)
 	delVnCh := make(chan config.VirtualNetwork)
 	return &Dataplane{

@@ -5,6 +5,8 @@ FROM osrg/gobgp
 
 MAINTAINER ISHIDA Wataru <ishida.wataru@lab.ntt.co.jp>
 
-ADD . /go/src/github.com/osrg/goplane/
-RUN go get -v github.com/osrg/goplane
-RUN go install github.com/osrg/goplane
+ENV GO15VENDOREXPERIMENT 1
+RUN curl https://glide.sh/get | sh
+ADD . $GOPATH/src/github.com/osrg/goplane/
+RUN cd $GOPATH/src/github.com/osrg/goplane && glide install
+RUn go install github.com/osrg/goplane

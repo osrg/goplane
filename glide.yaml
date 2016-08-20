@@ -11,10 +11,16 @@ import:
   subpackages:
   - api
   - packet/bgp
+  vcs: git
+  repo: https://github.com/ishidawataru/gobgp.git
+  version: dev
 - package: github.com/spf13/viper
 - package: github.com/vishvananda/netlink
   subpackages:
   - nl
+  vcs: git
+  repo: https://github.com/hash-set/netlink.git
+  version: master
 - package: golang.org/x/net
   subpackages:
   - context
