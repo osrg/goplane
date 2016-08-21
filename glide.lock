@@ -1,5 +1,5 @@
 hash: 2d7c677b98bc7dc2b5bb4d66e6128ac39f89a920ef1a53079bfdd5054858d5f1
-updated: 2016-08-21T08:58:55.398121675Z
+updated: 2016-08-21T14:23:56.757340704Z
 imports:
 - name: github.com/armon/go-radix
   version: 4239b77079c7b5d1243b7b4736304ce8ddb6f0f2
@@ -45,7 +45,7 @@ imports:
 - name: github.com/mitchellh/mapstructure
   version: ca63d7c062ee3c9f34db231e352b60012b4fd0c1
 - name: github.com/osrg/gobgp
-  version: b7caacf731d24793ef4eb9f1dbfb9846da7543d4
+  version: 09a506f1e2873e6c0a05c3b7dbf97a6db2b3786c
   repo: https://github.com/ishidawataru/gobgp.git
   vcs: git
   subpackages:

@@ -32,5 +32,12 @@ matrix:
     services:
     - docker
     script: test/travis_script.sh
+  - go: 1.7
+    sudo: required
+    env:
+    - TEST=test/netlink/unnumbered_test.py
+    services:
+    - docker
+    script: test/travis_script.sh
 
 go_import_path: github.com/osrg/goplane

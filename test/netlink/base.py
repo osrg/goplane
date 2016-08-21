@@ -119,6 +119,7 @@ class Bridge(object):
                     address, mask = self.next_ip_address().split('/')
                     ip.addr('add', index=guest, address=address, mask=int(mask))
                     ctn.ip_addrs.append((ifname, address, self.name))
+            return ifname
 
 
 class Container(object):
@@ -179,14 +180,16 @@ class BGPContainer(Container):
         super(BGPContainer, self).run()
 
     def add_peer(self, peer, passwd='', evpn=False, is_rs_client=False,
-                 policies=None, passive=False):
-        neigh_addr = ''
-        for me, you in itertools.product(self.ip_addrs, peer.ip_addrs):
-            if me[2] == you[2]:
-                neigh_addr = you[1]
+                 policies=None, passive=False, interface=''):
 
-        if neigh_addr == '':
-            raise Exception('peer {0} seems not ip reachable'.format(peer))
+        neigh_addr = ''
+        if interface == '' :
+            for me, you in itertools.product(self.ip_addrs, peer.ip_addrs):
+                if me[2] == you[2]:
+                    neigh_addr = you[1]
+
+            if neigh_addr == '':
+                raise Exception('peer {0} seems not ip reachable'.format(peer))
 
         if not policies:
             policies = []
@@ -196,7 +199,8 @@ class BGPContainer(Container):
                             'evpn': evpn,
                             'is_rs_client': is_rs_client,
                             'policies': policies,
-                            'passive' : passive}
+                            'passive' : passive,
+                            'interface' : interface}
         self.create_config()
 
     def del_peer(self, peer):
@@ -270,31 +274,41 @@ goplane -f {0}/goplane.conf -l {1} -p > {0}/goplane.log 2>&1
         config = {'global': {'config': {'as': self.asn, 'router-id': self.router_id},
                              'use-multiple-paths': {'config': {'enabled': True}}}}
         for peer, info in self.peers.iteritems():
-            if self.asn == peer.asn:
-                peer_type = self.PEER_TYPE_INTERNAL
-            else:
-                peer_type = self.PEER_TYPE_EXTERNAL
+            if info['interface'] == '':
+                if self.asn == peer.asn:
+                    peer_type = self.PEER_TYPE_INTERNAL
+                else:
+                    peer_type = self.PEER_TYPE_EXTERNAL
 
-            afi_safi_list = []
-            version = netaddr.IPNetwork(info['neigh_addr']).version
-            if version == 4:
-                afi_safi_list.append({'config': {'afi-safi-name': 'ipv4-unicast'}})
-            elif version == 6:
-                afi_safi_list.append({'config': {'afi-safi-name': 'ipv6-unicast'}})
+                afi_safi_list = []
+                version = netaddr.IPNetwork(info['neigh_addr']).version
+                if version == 4:
+                    afi_safi_list.append({'config': {'afi-safi-name': 'ipv4-unicast'}})
+                elif version == 6:
+                    afi_safi_list.append({'config': {'afi-safi-name': 'ipv6-unicast'}})
+                else:
+                    Exception('invalid ip address version. {0}'.format(version))
+
+                n = {'config': {
+                        'neighbor-address': info['neigh_addr'],
+                        'peer-as': peer.asn,
+                        'local-as': self.asn,
+                     },
+                     'afi-safis': afi_safi_list,
+                    }
             else:
-                Exception('invalid ip address version. {0}'.format(version))
+                afi_safi_list = [
+                        {'config': {'afi-safi-name': 'ipv4-unicast'}},
+                        {'config': {'afi-safi-name': 'ipv6-unicast'}},
+                ]
+                n = {'config': {'neighbor-interface': info['interface']},
+                     'afi-safis': afi_safi_list}
+
+            if len(info['passwd']) > 0:
+                n['config']['auth-password'] = info['passwd']
 
             if info['evpn']:
                 afi_safi_list.append({'config': {'afi-safi-name': 'l2vpn-evpn'}})
-
-            n = {'config': {
-                    'neighbor-address': info['neigh_addr'],
-                    'peer-as': peer.asn,
-                    'local-as': self.asn,
-                    'auth-password': info['passwd'],
-                 },
-                 'afi-safis': afi_safi_list,
-                }
 
             if info['passive']:
                 n['transport'] = {'config': {'passive-mode':True}}

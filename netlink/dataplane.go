@@ -54,12 +54,60 @@ func (d *Dataplane) advPath(p *table.Path) error {
 	return err
 }
 
+func (d *Dataplane) getNexthop(path *table.Path) (int, net.IP, int) {
+	var flags int
+	if path == nil || path.IsLocal() {
+		return 0, nil, flags
+	}
+	nh := path.GetNexthop()
+	if nh.To4() != nil {
+		return 0, nh.To4(), flags
+	}
+	list, err := netlink.NeighList(0, netlink.FAMILY_V6)
+	if err != nil {
+		log.Errorf("failed to get neigh list: %s", err)
+		return 0, nil, flags
+	}
+	var neigh *netlink.Neigh
+	for _, n := range list {
+		if n.IP.Equal(nh) {
+			neigh = &n
+			break
+		}
+	}
+	if neigh == nil {
+		log.Warnf("no neighbor info for %s", path)
+		return 0, nil, flags
+	}
+	list, err = netlink.NeighList(neigh.LinkIndex, netlink.FAMILY_V4)
+	if err != nil {
+		log.Errorf("failed to get neigh list: %s", err)
+		return 0, nil, flags
+	}
+	flags = int(netlink.FLAG_ONLINK)
+	for _, n := range list {
+		if n.HardwareAddr.String() == neigh.HardwareAddr.String() {
+			return n.LinkIndex, n.IP.To4(), flags
+		}
+	}
+	nh = net.IPv4(169, 254, 0, 1)
+	err = netlink.NeighAdd(&netlink.Neigh{
+		LinkIndex:    neigh.LinkIndex,
+		State:        netlink.NUD_PERMANENT,
+		IP:           nh,
+		HardwareAddr: neigh.HardwareAddr,
+	})
+	if err != nil {
+		log.Errorf("neigh add: %s", err)
+	}
+	return neigh.LinkIndex, nh, flags
+}
+
 func (d *Dataplane) modRib(paths []*table.Path) error {
 	if len(paths) == 0 {
 		return nil
 	}
 	p := paths[0]
-	nexthop := p.GetNexthop()
 
 	dst, _ := netlink.ParseIPNet(p.GetNlri().String())
 	route := &netlink.Route{
@@ -67,21 +115,25 @@ func (d *Dataplane) modRib(paths []*table.Path) error {
 		Src: net.ParseIP(d.routerId),
 	}
 
-	log.Info("paths:", paths)
-
 	if len(paths) == 1 {
 		if p.IsLocal() {
 			return nil
 		}
-		route.Gw = nexthop
+		link, gw, flags := d.getNexthop(p)
+		route.Gw = gw
+		route.LinkIndex = link
+		route.Flags = flags
 	} else {
 		mp := make([]*netlink.NexthopInfo, 0, len(paths))
 		for _, path := range paths {
 			if path.IsLocal() {
 				continue
 			}
+			link, gw, flags := d.getNexthop(path)
+			route.Flags = flags
 			mp = append(mp, &netlink.NexthopInfo{
-				Gw: path.GetNexthop(),
+				Gw:        gw,
+				LinkIndex: link,
 			})
 		}
 		if len(mp) == 0 {
