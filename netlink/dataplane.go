@@ -130,10 +130,10 @@ func (d *Dataplane) modRib(paths []*table.Path) error {
 				continue
 			}
 			link, gw, flags := d.getNexthop(path)
-			route.Flags = flags
 			mp = append(mp, &netlink.NexthopInfo{
 				Gw:        gw,
 				LinkIndex: link,
+				Flags:     flags,
 			})
 		}
 		if len(mp) == 0 {

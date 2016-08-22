@@ -1,5 +1,5 @@
-hash: 2d7c677b98bc7dc2b5bb4d66e6128ac39f89a920ef1a53079bfdd5054858d5f1
-updated: 2016-08-21T14:23:56.757340704Z
+hash: 920073ed44e62246f39f03d006ee0cc8cf55e064ba84d5fccb71a7577fdd09c8
+updated: 2016-08-22T02:42:43.942318805Z
 imports:
 - name: github.com/armon/go-radix
   version: 4239b77079c7b5d1243b7b4736304ce8ddb6f0f2
@@ -82,8 +82,8 @@ imports:
 - name: github.com/spf13/viper
   version: 654fc7bb54d0c138ef80405ff577391f79c0c32d
 - name: github.com/vishvananda/netlink
-  version: c8f52d3ce540d01222effb9c36c0510ff86b1494
-  repo: https://github.com/hash-set/netlink.git
+  version: ec395761439a84ca2b7ae00f7a05d429c08b864a
+  repo: https://github.com/ishidawataru/netlink.git
   vcs: git
   subpackages:
   - nl

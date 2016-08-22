@@ -28,6 +28,8 @@ from nsenter import Namespace
 
 TEST_BASE_DIR = '/tmp/goplane'
 
+IN6_ADDR_GEN_MODE_NONE = 1
+
 dckr = Client()
 
 flatten = lambda l: itertools.chain.from_iterable(l)
@@ -62,6 +64,7 @@ class Bridge(object):
         ip.link('add', ifname=name, kind='bridge')
         br = ip.link_lookup(ifname=name)
         br = br[0]
+        ip.link('set', index=br, IFLA_AF_SPEC={'attrs': [['AF_INET6', {'attrs': [['IFLA_INET6_ADDR_GEN_MODE', 1]]}]]})
         ip.link('set', index=br, state='up')
 
         if with_ip:

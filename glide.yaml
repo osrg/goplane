@@ -19,8 +19,8 @@ import:
   subpackages:
   - nl
   vcs: git
-  repo: https://github.com/hash-set/netlink.git
-  version: master
+  repo: https://github.com/ishidawataru/netlink.git
+  version: mpath
 - package: golang.org/x/net
   subpackages:
   - context

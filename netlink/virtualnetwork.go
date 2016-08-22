@@ -338,10 +338,10 @@ func (f *VirtualNetwork) modFdb(path *Path) error {
 
 	n := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
-		Family:       int(NDA_VNI),
-		State:        192,
-		Type:         1,
-		Flags:        int(NTF_SELF),
+		Family:       int(netlink.NDA_VNI),
+		State:        int(netlink.NUD_NOARP | netlink.NUD_PERMANENT),
+		Type:         syscall.RTM_NEWNEIGH,
+		Flags:        int(netlink.NTF_SELF),
 		IP:           ip,
 		HardwareAddr: mac,
 	}
