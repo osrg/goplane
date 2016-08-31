@@ -17,10 +17,11 @@ package config
 
 import (
 	log "github.com/Sirupsen/logrus"
+	bgpconfig "github.com/osrg/gobgp/config"
 	"github.com/spf13/viper"
 )
 
-func ReadConfigfileServe(path, format string, configCh chan *Config, reloadCh chan bool) {
+func ReadConfigfileServe(path, format string, configCh chan *Config, bgpConfigCh chan *bgpconfig.BgpConfigSet, reloadCh chan bool) {
 	for {
 		<-reloadCh
 		c := &Config{}
@@ -34,6 +35,14 @@ func ReadConfigfileServe(path, format string, configCh chan *Config, reloadCh ch
 		err = v.UnmarshalExact(&c)
 		if err != nil {
 			log.Fatal("can't read config file ", path, ", ", err)
+		}
+		emptyBGPGlobal := &bgpconfig.Global{}
+		if !emptyBGPGlobal.Equal(&c.BGP.Global) {
+			err := bgpconfig.SetDefaultConfigValues(&c.BGP)
+			if err != nil {
+				log.Fatal(err)
+			}
+			bgpConfigCh <- &c.BGP
 		}
 		configCh <- c
 	}

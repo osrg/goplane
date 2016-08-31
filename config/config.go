@@ -15,6 +15,10 @@
 
 package config
 
+import (
+	bgpconfig "github.com/osrg/gobgp/config"
+)
+
 type VirtualNetwork struct {
 	RD               string   `mapstructure:"rd"`
 	VNI              uint32   `mapstructure:"vni"`
@@ -36,6 +40,7 @@ type Iptables struct {
 }
 
 type Config struct {
-	Dataplane Dataplane `mapstructure:"dataplane"`
-	Iptables  Iptables  `mapstructure:"iptables"`
+	Dataplane Dataplane              `mapstructure:"dataplane"`
+	Iptables  Iptables               `mapstructure:"iptables"`
+	BGP       bgpconfig.BgpConfigSet `mapstructure:"bgp"`
 }

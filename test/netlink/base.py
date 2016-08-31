@@ -226,23 +226,25 @@ class GoPlaneContainer(BGPContainer):
     SHARED_VOLUME = '/root/shared_volume'
 
     def __init__(self, name, asn, router_id, ctn_image_name='osrg/goplane',
-                 log_level='debug'):
+                 log_level='debug', bgp_remote=False):
         super(GoPlaneContainer, self).__init__(name, asn, router_id,
                                              ctn_image_name)
         self.shared_volumes.append((self.config_dir, self.SHARED_VOLUME))
         self.vns = []
-        self.log_level = 'debug'
+        self.log_level = log_level
+        self.bgp_remote = bgp_remote
 
     def start_goplane(self):
-        name = '{0}/start_gobgp.sh'.format(self.config_dir)
-        with open(name, 'w') as f:
-            f.write('''#!/bin/bash
-gobgpd -f {0}/gobgpd.conf -l {1} -p > {0}/gobgpd.log 2>&1
-'''.format(self.SHARED_VOLUME, self.log_level))
-        os.chmod(name, 0755)
-        self.local('{0}/start_gobgp.sh'.format(self.SHARED_VOLUME), detach=True)
+        if self.bgp_remote:
+            name = '{0}/start_gobgp.sh'.format(self.config_dir)
+            with open(name, 'w') as f:
+                f.write('''#!/bin/bash
+    gobgpd -f {0}/gobgpd.conf -l {1} -p > {0}/gobgpd.log 2>&1
+    '''.format(self.SHARED_VOLUME, self.log_level))
+            os.chmod(name, 0755)
+            self.local('{0}/start_gobgp.sh'.format(self.SHARED_VOLUME), detach=True)
 
-        time.sleep(1)
+            time.sleep(1)
 
         name = '{0}/start_goplane.sh'.format(self.config_dir)
         with open(name, 'w') as f:
@@ -269,6 +271,10 @@ goplane -f {0}/goplane.conf -l {1} -p > {0}/goplane.log 2>&1
                                                           'member-interfaces': info['member']})
 
         config = {'dataplane': dplane_config}
+
+        if not self.bgp_remote:
+            bgp_config = self.create_gobgp_config()
+            config['bgp'] = bgp_config
 
         with open('{0}/goplane.conf'.format(self.config_dir), 'w') as f:
             f.write(toml.dumps(config))
@@ -324,15 +330,20 @@ goplane -f {0}/goplane.conf -l {1} -p > {0}/goplane.log 2>&1
 
             config['neighbors'].append(n)
 
+        if not self.bgp_remote:
+            return config
+
         with open('{0}/gobgpd.conf'.format(self.config_dir), 'w') as f:
             f.write(toml.dumps(config))
 
     def create_config(self):
-        self.create_gobgp_config()
+        if self.bgp_remote:
+            self.create_gobgp_config()
         self.create_goplane_config()
 
     def reload_config(self):
-        self.local('/usr/bin/pkill gobgpd -SIGHUP')
+        if self.bgp_remote:
+            self.local('/usr/bin/pkill gobgpd -SIGHUP')
         self.local('/usr/bin/pkill goplane -SIGHUP')
 
     def add_vn(self, vni, vtep, color, member, vxlan_port=8472):

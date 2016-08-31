@@ -218,18 +218,29 @@ func (d *Dataplane) monitorBest() error {
 }
 
 func (d *Dataplane) Serve() error {
-	timeout := grpc.WithTimeout(time.Second)
-	conn, err := grpc.Dial(d.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
-	if err != nil {
-		log.Fatalf("%s", err)
+	for {
+		timeout := grpc.WithTimeout(time.Second)
+		conn, err := grpc.Dial(d.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
+		var rsp *api.GetServerResponse
+		if err != nil {
+			log.Errorf("%s", err)
+			goto ERR
+		}
+		d.client = api.NewGobgpApiClient(conn)
+		rsp, err = d.client.GetServer(context.Background(), &api.GetServerRequest{})
+		if err != nil {
+			log.Errorf("%s", err)
+			goto ERR
+		}
+		d.routerId = rsp.Global.RouterId
+		d.localAS = rsp.Global.As
+		if d.routerId != "" && d.localAS != 0 {
+			break
+		}
+	ERR:
+		log.Debug("BGP server is not ready..waiting...")
+		time.Sleep(time.Second * 10)
 	}
-	d.client = api.NewGobgpApiClient(conn)
-	rsp, err := d.client.GetServer(context.Background(), &api.GetServerRequest{})
-	if err != nil {
-		return err
-	}
-	d.routerId = rsp.Global.RouterId
-	d.localAS = rsp.Global.As
 
 	lo, err := netlink.LinkByName("lo")
 	if err != nil {

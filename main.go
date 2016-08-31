@@ -30,6 +30,11 @@ import (
 	"github.com/osrg/goplane/config"
 	"github.com/osrg/goplane/iptables"
 	"github.com/osrg/goplane/netlink"
+
+	bgpapi "github.com/osrg/gobgp/api"
+	bgpconfig "github.com/osrg/gobgp/config"
+	"github.com/osrg/gobgp/packet/bgp"
+	bgpserver "github.com/osrg/gobgp/server"
 )
 
 type Dataplaner interface {
@@ -45,18 +50,20 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGHUP)
 
 	var opts struct {
-		ConfigFile    string `short:"f" long:"config-file" description:"specifying a config file"`
-		ConfigType    string `short:"t" long:"config-type" description:"specifying config type (toml, yaml, json)" default:"toml"`
-		LogLevel      string `short:"l" long:"log-level" description:"specifying log level"`
-		LogPlain      bool   `short:"p" long:"log-plain" description:"use plain format for logging (json by default)"`
-		UseSyslog     string `short:"s" long:"syslog" description:"use syslogd"`
-		Facility      string `long:"syslog-facility" description:"specify syslog facility"`
-		DisableStdlog bool   `long:"disable-stdlog" description:"disable standard logging"`
-		GrpcHost      string `long:"grpc-host" description:"grpc host" default:":50051"`
+		ConfigFile      string `short:"f" long:"config-file" description:"specifying a config file"`
+		ConfigType      string `short:"t" long:"config-type" description:"specifying config type (toml, yaml, json)" default:"toml"`
+		LogLevel        string `short:"l" long:"log-level" description:"specifying log level"`
+		LogPlain        bool   `short:"p" long:"log-plain" description:"use plain format for logging (json by default)"`
+		UseSyslog       string `short:"s" long:"syslog" description:"use syslogd"`
+		Facility        string `long:"syslog-facility" description:"specify syslog facility"`
+		DisableStdlog   bool   `long:"disable-stdlog" description:"disable standard logging"`
+		GrpcHost        string `long:"grpc-host" description:"grpc host" default:":50051"`
+		Remote          bool   `short:"r" long:"remote-gobgp" description:"remote gobgp mode"`
+		GracefulRestart bool   `short:"g" long:"graceful-restart" description:"flag restart-state in graceful-restart capability"`
 	}
 	_, err := flags.Parse(&opts)
 	if err != nil {
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	switch opts.LogLevel {
@@ -141,19 +148,117 @@ func main() {
 	}
 
 	if opts.ConfigFile == "" {
-		opts.ConfigFile = "goplaned.conf"
+		opts.ConfigFile = "goplane.conf"
 	}
 
 	configCh := make(chan *config.Config)
+	bgpConfigCh := make(chan *bgpconfig.BgpConfigSet)
 	reloadCh := make(chan bool)
-	go config.ReadConfigfileServe(opts.ConfigFile, opts.ConfigType, configCh, reloadCh)
+	go config.ReadConfigfileServe(opts.ConfigFile, opts.ConfigType, configCh, bgpConfigCh, reloadCh)
 	reloadCh <- true
+
+	var bgpServer *bgpserver.BgpServer
+	if !opts.Remote {
+		bgpServer = bgpserver.NewBgpServer()
+		go bgpServer.Serve()
+		grpcServer := bgpapi.NewGrpcServer(bgpServer, opts.GrpcHost)
+		go func() {
+			if err := grpcServer.Serve(); err != nil {
+				log.Fatalf("failed to listen grpc port: %s", err)
+			}
+		}()
+	}
 
 	var dataplane Dataplaner
 	var d *config.Dataplane
+	var c *bgpconfig.BgpConfigSet
 	var fsAgent *iptables.FlowspecAgent
 	for {
 		select {
+		case newConfig := <-bgpConfigCh:
+			if opts.Remote {
+				log.Warn("running in BGP remote mode. you can't configure BGP daemon via configuration file now")
+				continue
+			}
+
+			var added, deleted, updated []bgpconfig.Neighbor
+			var updatePolicy bool
+
+			if c == nil {
+				c = newConfig
+				if err := bgpServer.Start(&newConfig.Global); err != nil {
+					log.Fatalf("failed to set global config: %s", err)
+				}
+				if newConfig.Zebra.Config.Enabled {
+					if err := bgpServer.StartZebraClient(&newConfig.Zebra); err != nil {
+						log.Fatalf("failed to set zebra config: %s", err)
+					}
+				}
+				if len(newConfig.Collector.Config.Url) > 0 {
+					if err := bgpServer.StartCollector(&newConfig.Collector.Config); err != nil {
+						log.Fatalf("failed to set collector config: %s", err)
+					}
+				}
+				for _, c := range newConfig.RpkiServers {
+					if err := bgpServer.AddRpki(&c.Config); err != nil {
+						log.Fatalf("failed to set rpki config: %s", err)
+					}
+				}
+				for _, c := range newConfig.BmpServers {
+					if err := bgpServer.AddBmp(&c.Config); err != nil {
+						log.Fatalf("failed to set bmp config: %s", err)
+					}
+				}
+				for _, c := range newConfig.MrtDump {
+					if len(c.Config.FileName) == 0 {
+						continue
+					}
+					if err := bgpServer.EnableMrt(&c.Config); err != nil {
+						log.Fatalf("failed to set mrt config: %s", err)
+					}
+				}
+				p := bgpconfig.ConfigSetToRoutingPolicy(newConfig)
+				if err := bgpServer.UpdatePolicy(*p); err != nil {
+					log.Fatalf("failed to set routing policy: %s", err)
+				}
+
+				added = newConfig.Neighbors
+				if opts.GracefulRestart {
+					for i, n := range added {
+						if n.GracefulRestart.Config.Enabled {
+							added[i].GracefulRestart.State.LocalRestarting = true
+						}
+					}
+				}
+
+			} else {
+				added, deleted, updated, updatePolicy = bgpconfig.UpdateConfig(c, newConfig)
+				if updatePolicy {
+					log.Info("Policy config is updated")
+					p := bgpconfig.ConfigSetToRoutingPolicy(newConfig)
+					bgpServer.UpdatePolicy(*p)
+				}
+				c = newConfig
+			}
+
+			for i, p := range added {
+				log.Infof("Peer %v is added", p.Config.NeighborAddress)
+				bgpServer.AddNeighbor(&added[i])
+			}
+			for i, p := range deleted {
+				log.Infof("Peer %v is deleted", p.Config.NeighborAddress)
+				bgpServer.DeleteNeighbor(&deleted[i])
+			}
+			for i, p := range updated {
+				log.Infof("Peer %v is updated", p.Config.NeighborAddress)
+				u, _ := bgpServer.UpdateNeighbor(&updated[i])
+				updatePolicy = updatePolicy || u
+			}
+
+			if updatePolicy {
+				bgpServer.SoftResetIn("", bgp.RouteFamily(0))
+			}
+
 		case newConfig := <-configCh:
 			if dataplane == nil {
 				switch newConfig.Dataplane.Type {
