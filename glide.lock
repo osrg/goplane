@@ -1,5 +1,5 @@
-hash: 920073ed44e62246f39f03d006ee0cc8cf55e064ba84d5fccb71a7577fdd09c8
-updated: 2016-08-22T02:42:43.942318805Z
+hash: 2797de2530966c75453a4b694ee17c143754a90f85f6b9dc9d3458701dd005de
+updated: 2017-02-14T04:33:29.380017553Z
 imports:
 - name: github.com/armon/go-radix
   version: 4239b77079c7b5d1243b7b4736304ce8ddb6f0f2
@@ -24,10 +24,10 @@ imports:
   subpackages:
   - hcl/ast
   - hcl/parser
-  - hcl/token
-  - json/parser
   - hcl/scanner
   - hcl/strconv
+  - hcl/token
+  - json/parser
   - json/scanner
   - json/token
 - name: github.com/influxdata/influxdb
@@ -50,13 +50,13 @@ imports:
   vcs: git
   subpackages:
   - api
-  - packet/bgp
-  - table
   - config
-  - server
+  - packet/bgp
   - packet/bmp
-  - packet/rtr
   - packet/mrt
+  - packet/rtr
+  - server
+  - table
   - zebra
 - name: github.com/pkg/errors
   version: a22138067af1c4942683050411a841ade67fe1eb
@@ -82,9 +82,7 @@ imports:
 - name: github.com/spf13/viper
   version: 654fc7bb54d0c138ef80405ff577391f79c0c32d
 - name: github.com/vishvananda/netlink
-  version: ec395761439a84ca2b7ae00f7a05d429c08b864a
-  repo: https://github.com/ishidawataru/netlink.git
-  vcs: git
+  version: 87909c6dada5cba3aa659144a40b1e575d79d625
   subpackages:
   - nl
 - name: github.com/vishvananda/netns
@@ -92,17 +90,17 @@ imports:
 - name: golang.org/x/crypto
   version: c197bcf24cde29d3f73c7b4ac6fd41f4384e8af6
   subpackages:
-  - ssh
   - curve25519
+  - ssh
 - name: golang.org/x/net
   version: 07b51741c1d6423d4a6abab1c49940ec09cb1aaf
   subpackages:
   - context
   - http2
-  - trace
   - http2/hpack
-  - lex/httplex
   - internal/timeseries
+  - lex/httplex
+  - trace
 - name: golang.org/x/sys
   version: a646d33e2ee3172a661fc09bca23bb4889a41bc8
   subpackages:
@@ -121,8 +119,8 @@ imports:
   - internal
   - metadata
   - naming
-  - transport
   - peer
+  - transport
 - name: gopkg.in/tomb.v2
   version: 14b3d72120e8d10ea6e6b7f87f7175734b1faab8
 - name: gopkg.in/yaml.v2

@@ -4,3 +4,4 @@ netaddr
 docker-py
 nsenter
 pyroute2
+fabric

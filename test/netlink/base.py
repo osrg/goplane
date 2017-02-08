@@ -23,8 +23,12 @@ import time
 import netaddr
 import toml
 from pyroute2 import IPRoute
-from docker import Client
+try:
+    from docker import Client
+except ImportError:
+    from docker import APIClient as Client
 from nsenter import Namespace
+from fabric.api import local
 
 TEST_BASE_DIR = '/tmp/goplane'
 
@@ -157,8 +161,12 @@ class Container(object):
         self.is_running = False
 
     def local(self, cmd, stream=False, detach=False):
-        i = dckr.exec_create(container=self.name, cmd=cmd)
-        return dckr.exec_start(i['Id'], tty=True, stream=stream, detach=detach)
+        if stream:
+            i = dckr.exec_create(container=self.name, cmd=cmd)
+            return dckr.exec_start(i['Id'], tty=True, stream=stream, detach=detach)
+        else:
+            flag = '-d' if detach else ''
+            return local('docker exec {0} {1} {2}'.format(flag, self.name, cmd), capture=True)
 
 
 class BGPContainer(Container):

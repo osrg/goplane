@@ -15,12 +15,6 @@ import:
   repo: https://github.com/ishidawataru/gobgp.git
   version: dev
 - package: github.com/spf13/viper
-- package: github.com/vishvananda/netlink
-  subpackages:
-  - nl
-  vcs: git
-  repo: https://github.com/ishidawataru/netlink.git
-  version: mpath
 - package: golang.org/x/net
   subpackages:
   - context

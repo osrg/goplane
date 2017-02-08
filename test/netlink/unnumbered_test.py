@@ -53,12 +53,15 @@ class Test(unittest.TestCase):
                 return 'REACHABLE' in l[0]
 
             for i in range(20):
-                lhs.local('ping6 -c 1 ff02::1%{0}'.format(lhs_ifname))
-                rhs.local('ping6 -c 1 ff02::1%{0}'.format(rhs_ifname))
-                if f(lhs_ifname, lhs) and f(rhs_ifname, rhs):
-                    done = True
-                    break
-                time.sleep(1)
+                try:
+                    lhs.local('ping6 --numeric -c 1 ff02::1%{0}'.format(lhs_ifname))
+                    rhs.local('ping6 --numeric -c 1 ff02::1%{0}'.format(rhs_ifname))
+                    if f(lhs_ifname, lhs) and f(rhs_ifname, rhs):
+                        done = True
+                        break
+                    time.sleep(1)
+                except SystemExit:
+                    time.sleep(1)
 
             if not done:
                 raise Exception('timeout')
@@ -82,7 +85,7 @@ class Test(unittest.TestCase):
     def test_02_ping_check(self):
         def ping(ip):
             for i in range(10):
-                out = self.ctns['g1'].local("bash -c 'ping -c 1 {0} 2>&1 > /dev/null && echo true || echo false'".format(ip)).strip()
+                out = self.ctns['g1'].local("bash -c 'ping --numeric -c 1 {0} 2>&1 > /dev/null && echo true || echo false'".format(ip)).strip()
                 if out == 'true':
                     logging.debug('ping reachable')
                     return
