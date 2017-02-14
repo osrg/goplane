@@ -18,6 +18,15 @@ GoPlane is an agent for configuring linux network stack via [GoBGP](https://gith
     +=========================+
 ```
 
+## Install
+
+You need [glide](https://github.com/Masterminds/glide) to resolve goplane's dependencies.
+
+```
+$ go get github.com/osrg/goplane
+$ cd $GOPATH/src/github.com/osrg/goplane; glide install
+```
+
 ## Features
 - EVPN/VxLAN L2VPN construction
     - construct multi-tenant l2 domains using [BGP/EVPN](https://tools.ietf.org/html/rfc7432) and VxLAN

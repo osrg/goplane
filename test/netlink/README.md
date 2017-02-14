@@ -1,31 +1,37 @@
-goplane evpn/vxlan demo
+goplane evpn/vxlan demo - 'evpn_vxlan_test.py'
 ===
 
 This demo shows l2-vpn construction using [BGP/EVPN](https://tools.ietf.org/html/rfc7432) and VxLAN
 
+## Prerequisite
+
+- docker
+- python, pip
+
 ## How to run
 you only need to type 3 commands to play (tested in Ubuntu trusty and xenial).
 
-1. install dependent python package to run demo.py
+1. install dependent python packages
     
      ```
-     $ pip install -r ./pip-requires.txt
+     $ export GOPLANE=$GOPATH/src/github.com/osrg/goplane
+     $ pip install -r $GOPLANE/test/pip-requires.txt
      ```
-2. install docker and other dependent tools. also create goplane container.
+2. build goplane docker image
     
      ```
-     $ sudo ./demo.py prepare
+     $ docker build -t osrg/goplane $GOPLANE
      ```
-3. run and play!
+3. run and play! (this may take time to finish)
     
      ```
-     $ sudo ./demo.py
+     $ sudo -E PYTHONPATH=$GOPLANE/test python $GOPLANE/test/netlink/evpn_vxlan_test.py
      ```
 
 ## How to play
-demo.py boots 3 goplane containers (g1 to g3) and 6 host containers (h1 to h3
-and j1 to j3) in the following topology. h1 to h3 belongs to the same virtual
-network and j1 to j3 as well.
+`evpn_vxlan_test.py` boots 3 goplane containers (g1 to g3) and 6 host containers
+(h1 to h3 and j1 to j3) in the following topology. h1 to h3 belongs to the same
+virtual network and j1 to j3 as well.
 
 ```
      ------------------------------
@@ -180,10 +186,4 @@ fa:e1:0c:fa:28:88 dev vtep20 dst 192.168.0.2 self permanent
 33:33:ff:f6:d1:99 dev vtep20 dst 192.168.0.2 self permanent
 c6:74:3f:df:68:52 dev vtep20 dst 192.168.0.2 self permanent
 2a:bc:df:a2:bf:79 dev vtep20 dst 192.168.0.3 self permanent
-```
-
-Finally, to clean up this demo, type
-
-```
-$ sudo ./demo.py clean
 ```
