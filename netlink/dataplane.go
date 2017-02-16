@@ -141,25 +141,12 @@ func (d *Dataplane) modRib(paths []*table.Path) error {
 		}
 		route.MultiPath = mp
 	}
-	routes, _ := netlink.RouteList(nil, netlink.FAMILY_V4)
-	for _, route := range routes {
-		d := "0.0.0.0/0"
-		if route.Dst != nil {
-			d = route.Dst.String()
-		}
-		if d == dst.String() {
-			log.Info("del route:", route)
-			err := netlink.RouteDel(&route)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	if p.IsWithdraw {
-		return nil
+		log.Info("del route:", route)
+		return netlink.RouteDel(route)
 	}
 	log.Info("add route:", route)
-	return netlink.RouteAdd(route)
+	return netlink.RouteReplace(route)
 }
 
 func (d *Dataplane) monitorBest() error {

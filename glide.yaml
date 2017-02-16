@@ -19,4 +19,7 @@ import:
   subpackages:
   - context
 - package: google.golang.org/grpc
+  version: v1.0.3-4-g2b7e876
 - package: gopkg.in/tomb.v2
+- package: github.com/vishvananda/netlink
+  version: 87909c6dada5cba3aa659144a40b1e575d79d625
