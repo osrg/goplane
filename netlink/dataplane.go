@@ -21,13 +21,12 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
-	api "github.com/osrg/gobgp/api"
+	"github.com/osrg/gobgp/client"
+	bgpconfig "github.com/osrg/gobgp/config"
 	"github.com/osrg/gobgp/packet/bgp"
 	"github.com/osrg/gobgp/table"
 	"github.com/osrg/goplane/config"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 	"gopkg.in/tomb.v2"
 )
 
@@ -40,18 +39,9 @@ type Dataplane struct {
 	addVnCh   chan config.VirtualNetwork
 	delVnCh   chan config.VirtualNetwork
 	grpcHost  string
-	client    api.GobgpApiClient
+	client    *client.Client
 	routerId  string
 	localAS   uint32
-}
-
-func (d *Dataplane) advPath(p *table.Path) error {
-	arg := &api.AddPathRequest{
-		Resource: api.Resource_GLOBAL,
-		Path:     api.ToPathApi(p),
-	}
-	_, err := d.client.AddPath(context.Background(), arg)
-	return err
 }
 
 func (d *Dataplane) getNexthop(path *table.Path) (int, net.IP, int) {
@@ -151,51 +141,12 @@ func (d *Dataplane) modRib(paths []*table.Path) error {
 
 func (d *Dataplane) monitorBest() error {
 
-	option := api.ToNativeOption{
-		LocalAS: d.localAS,
-		LocalID: net.ParseIP(d.routerId),
-	}
-
-	err := func() error {
-		rsp, err := d.client.GetRib(context.Background(), &api.GetRibRequest{
-			Table: &api.Table{
-				Type:   api.Resource_GLOBAL,
-				Family: uint32(bgp.RF_IPv4_UC),
-			},
-		})
-		if err != nil {
-			return err
-		}
-		rib := rsp.Table
-		for _, dst := range rib.Destinations {
-			res, err := dst.ToNativeDestination(option)
-			if err != nil {
-				return err
-			}
-			bdst := res.Select(table.DestinationSelectOption{Best: true, MultiPath: true})
-			d.modRibCh <- bdst.GetAllKnownPathList()
-		}
-		return nil
-	}()
-
-	if err != nil {
-		return err
-	}
-
-	arg := &api.Table{
-		Type:   api.Resource_GLOBAL,
-		Family: uint32(bgp.RF_IPv4_UC),
-	}
-	stream, err := d.client.MonitorRib(context.Background(), arg)
+	watcher, err := d.client.MonitorRIB(bgp.RF_IPv4_UC, true)
 	if err != nil {
 		return err
 	}
 	for {
-		res, err := stream.Recv()
-		if err != nil {
-			return err
-		}
-		dst, err := res.ToNativeDestination(option)
+		dst, err := watcher.Recv()
 		if err != nil {
 			return err
 		}
@@ -206,21 +157,20 @@ func (d *Dataplane) monitorBest() error {
 
 func (d *Dataplane) Serve() error {
 	for {
-		timeout := grpc.WithTimeout(time.Second)
-		conn, err := grpc.Dial(d.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
-		var rsp *api.GetServerResponse
+		var s *bgpconfig.Global
+		client, err := client.New(d.grpcHost)
 		if err != nil {
 			log.Errorf("%s", err)
 			goto ERR
 		}
-		d.client = api.NewGobgpApiClient(conn)
-		rsp, err = d.client.GetServer(context.Background(), &api.GetServerRequest{})
+		d.client = client
+		s, err = d.client.GetServer()
 		if err != nil {
 			log.Errorf("%s", err)
 			goto ERR
 		}
-		d.routerId = rsp.Global.RouterId
-		d.localAS = rsp.Global.As
+		d.routerId = s.Config.RouterId
+		d.localAS = s.Config.As
 		if d.routerId != "" && d.localAS != 0 {
 			break
 		}
@@ -276,7 +226,7 @@ func (d *Dataplane) Serve() error {
 				log.Error("failed to mod rib: ", err)
 			}
 		case p := <-d.advPathCh:
-			err = d.advPath(p)
+			_, err := d.client.AddPath([]*table.Path{p})
 			if err != nil {
 				log.Error("failed to adv path: ", err)
 			}

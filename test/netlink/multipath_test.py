@@ -48,7 +48,7 @@ class Test(unittest.TestCase):
 
     def test_01_neighbor_established(self):
         for i in range(20):
-            if all(v['info']['bgp_state'] == 'BGP_FSM_ESTABLISHED' for v in json.loads(self.ctns['g1'].local('gobgp neighbor -j'))):
+            if all(v['state']['session-state'] == 'established' for v in json.loads(self.ctns['g1'].local('gobgp neighbor -j'))):
                     logging.debug('all peers got established')
                     return
             time.sleep(1)

@@ -18,60 +18,14 @@ package iptables
 import (
 	"fmt"
 	"io"
-	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/coreos/go-iptables/iptables"
-	api "github.com/osrg/gobgp/api"
+	"github.com/osrg/gobgp/client"
 	"github.com/osrg/gobgp/packet/bgp"
+	bgptable "github.com/osrg/gobgp/table"
 	"github.com/osrg/goplane/config"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
 )
-
-type Path struct {
-	Nlri       bgp.AddrPrefixInterface
-	PathAttrs  []bgp.PathAttributeInterface
-	Best       bool
-	IsWithdraw bool
-}
-
-func ApiStruct2Path(p *api.Path) ([]*Path, error) {
-	nlris := make([]bgp.AddrPrefixInterface, 0, 1)
-	pattr := make([]bgp.PathAttributeInterface, 0, len(p.Pattrs))
-	for _, attr := range p.Pattrs {
-		p, err := bgp.GetPathAttribute(attr)
-		if err != nil {
-			return nil, err
-		}
-
-		err = p.DecodeFromBytes(attr)
-		if err != nil {
-			return nil, err
-		}
-
-		switch p.GetType() {
-		case bgp.BGP_ATTR_TYPE_MP_REACH_NLRI:
-			mpreach := p.(*bgp.PathAttributeMpReachNLRI)
-			for _, nlri := range mpreach.Value {
-				nlris = append(nlris, nlri)
-			}
-			continue
-		}
-		pattr = append(pattr, p)
-	}
-
-	paths := make([]*Path, 0, len(nlris))
-	for _, nlri := range nlris {
-		paths = append(paths, &Path{
-			Nlri:       nlri,
-			PathAttrs:  pattr,
-			Best:       p.Best,
-			IsWithdraw: p.IsWithdraw,
-		})
-	}
-	return paths, nil
-}
 
 func FlowSpec2IptablesRule(nlri []bgp.FlowSpecComponentInterface, attr []bgp.PathAttributeInterface) ([]string, error) {
 	spec := make([]string, 0, len(nlri))
@@ -129,67 +83,27 @@ func (a *FlowspecAgent) Serve() error {
 	}
 	log.Infof("cleared iptables chain: %s, table: %s", chain, table)
 
-	ch := make(chan *Path, 16)
+	ch := make(chan *bgptable.Path, 16)
 
 	go func() {
-
-		timeout := grpc.WithTimeout(time.Second)
-		conn, err := grpc.Dial(a.grpcHost, timeout, grpc.WithBlock(), grpc.WithInsecure())
+		client, err := client.New(a.grpcHost)
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
 
-		client := api.NewGobgpApiClient(conn)
-		{
-			arg := &api.Table{
-				Type:   api.Resource_GLOBAL,
-				Family: uint32(bgp.RF_FS_IPv4_UC),
-			}
-
-			rsp, err := client.GetRib(context.Background(), &api.GetRibRequest{
-				Table: arg,
-			})
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
-			rib := rsp.Table
-			for _, d := range rib.Destinations {
-				for _, p := range d.Paths {
-					if p.Best {
-						if paths, err := ApiStruct2Path(p); err != nil {
-							log.Fatalf("%s", err)
-						} else {
-							for _, path := range paths {
-								ch <- path
-							}
-						}
-					}
-				}
-			}
-		}
-
-		arg := &api.Table{
-			Type:   api.Resource_GLOBAL,
-			Family: uint32(bgp.RF_FS_IPv4_UC),
-		}
-
-		stream, err := client.MonitorRib(context.Background(), arg)
+		watcher, err := client.MonitorRIB(bgp.RF_FS_IPv4_UC, true)
 		if err != nil {
 			log.Fatalf("%s", err)
 		}
 
 		for {
-			d, err := stream.Recv()
+			d, err := watcher.Recv()
 			if err == io.EOF {
 				break
 			} else if err != nil {
 				log.Fatalf("%s", err)
 			}
-			paths, err := ApiStruct2Path(d.Paths[0])
-			if err != nil {
-				log.Fatalf("%s", err)
-			}
-			for _, p := range paths {
+			for _, p := range d.GetAllKnownPathList() {
 				ch <- p
 			}
 		}
@@ -198,9 +112,9 @@ func (a *FlowspecAgent) Serve() error {
 	list := make([]*bgp.FlowSpecNLRI, 0, 16)
 
 	for p := range ch {
-		nlri := &p.Nlri.(*bgp.FlowSpecIPv4Unicast).FlowSpecNLRI
+		nlri := &p.GetNlri().(*bgp.FlowSpecIPv4Unicast).FlowSpecNLRI
 
-		spec, err := FlowSpec2IptablesRule(nlri.Value, p.PathAttrs)
+		spec, err := FlowSpec2IptablesRule(nlri.Value, p.GetPathAttrs())
 		if err != nil {
 			log.Warnf("failed to convert flowspec spec to iptables rule: %s", err)
 			continue

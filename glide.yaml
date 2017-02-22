@@ -8,18 +8,18 @@ import:
   - iptables
 - package: github.com/jessevdk/go-flags
 - package: github.com/osrg/gobgp
+  version: unnumbered
+  repo: https://github.com/ishidawataru/gobgp.git
+  vcs: git
   subpackages:
   - api
   - packet/bgp
-  vcs: git
-  repo: https://github.com/ishidawataru/gobgp.git
-  version: dev
 - package: github.com/spf13/viper
 - package: golang.org/x/net
   subpackages:
   - context
-- package: google.golang.org/grpc
-  version: v1.0.3-4-g2b7e876
 - package: gopkg.in/tomb.v2
 - package: github.com/vishvananda/netlink
   version: 87909c6dada5cba3aa659144a40b1e575d79d625
+- package: google.golang.org/grpc
+  version: ^1.0.5

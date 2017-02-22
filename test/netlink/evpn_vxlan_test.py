@@ -90,14 +90,14 @@ class Test(unittest.TestCase):
 
     def test_01_neighbor_established(self):
         for i in range(20):
-            if all(v['info']['bgp_state'] == 'BGP_FSM_ESTABLISHED' for v in json.loads(self.ctns['g1'].local('gobgp neighbor -j'))):
+            if all(v['state']['session-state'] == 'established' for v in json.loads(self.ctns['g1'].local('gobgp neighbor -j'))):
                     logging.debug('all peers got established')
                     return
             time.sleep(1)
         raise Exception('timeout')
 
     def test_02_ping_check(self):
-        for i in range(10):
+        for i in range(60):
             out = self.ctns['h1'].local("bash -c 'ping -c 1 10.10.10.3 2>&1 > /dev/null && echo true || echo false'").strip()
             if out == 'true':
                 logging.debug('ping reachable')

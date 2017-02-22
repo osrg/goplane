@@ -1,10 +1,10 @@
-hash: dbfb6bacf9569d33e4bc5a84d8f71bb04e49b9f1193d593c5946e0ea6a64cd06
-updated: 2017-02-16T03:44:21.188116198Z
+hash: 72404278d79e8d6e5d2f53b23149a71076d4ddf75a4c1b9326b3b8d385a4c607
+updated: 2017-02-22T13:50:16.303134962Z
 imports:
 - name: github.com/armon/go-radix
   version: 4239b77079c7b5d1243b7b4736304ce8ddb6f0f2
 - name: github.com/coreos/go-iptables
-  version: 18855ec8acc0dd8dc2977fa5a446b0432b499707
+  version: 5463fbac3bcc6b990663941c2e12660d19f6b36d
   subpackages:
   - iptables
 - name: github.com/eapache/channels
@@ -14,11 +14,11 @@ imports:
 - name: github.com/fsnotify/fsnotify
   version: a904159b9206978bb6d53fcc7a769e5cd726c737
 - name: github.com/golang/protobuf
-  version: 4bd1920723d7b7c925de087aa32e2187708897f7
+  version: 69b215d01a5606c843240eab4937eab3acee6530
   subpackages:
   - proto
 - name: github.com/hashicorp/hcl
-  version: 372e8ddaa16fd67e371e9323807d056b799360af
+  version: 630949a3c5fa3c613328e1b8256052cbc2327c9b
   subpackages:
   - hcl/ast
   - hcl/parser
@@ -29,23 +29,24 @@ imports:
   - json/scanner
   - json/token
 - name: github.com/influxdata/influxdb
-  version: 8c25f0104eba8c0060e44a489f9d549e7d6a7a4d
+  version: f67b8afb6f5174799bbcd9e825a5d2a4b0edd452
   subpackages:
   - client/v2
   - models
   - pkg/escape
 - name: github.com/jessevdk/go-flags
-  version: f2785f5820ec967043de79c8be97edfc464ca745
+  version: 460c7bb0abd6e927f2767cadc91aa6ef776a98b4
 - name: github.com/magiconair/properties
   version: b3b15ef068fd0b17ddf408a23669f20811d194d2
 - name: github.com/mitchellh/mapstructure
   version: db1efb556f84b25a0a13a04aad883943538ad2e0
 - name: github.com/osrg/gobgp
-  version: 09a506f1e2873e6c0a05c3b7dbf97a6db2b3786c
+  version: ce12b084250bfd8b8ea86a62c88f43e72b0dae38
   repo: https://github.com/ishidawataru/gobgp.git
   vcs: git
   subpackages:
   - api
+  - client
   - config
   - packet/bgp
   - packet/bmp
@@ -57,33 +58,33 @@ imports:
 - name: github.com/pelletier/go-buffruneio
   version: df1e16fde7fc330a0ca68167c23bf7ed6ac31d6d
 - name: github.com/pelletier/go-toml
-  version: d1fa2118c12c44e4f5004da216d1efad10cb4924
+  version: 22139eb5469018e7374b3e7ef653de37ffb44f72
 - name: github.com/satori/go.uuid
   version: b061729afc07e77a8aa4fad0a2fd840958f1942a
 - name: github.com/Sirupsen/logrus
-  version: c078b1e43f58d563c74cebe63c85789e76ddb627
+  version: 7f4b1adc791766938c29457bed0703fb9134421a
   subpackages:
   - hooks/syslog
 - name: github.com/spf13/afero
-  version: 72b31426848c6ef12a7a8e216708cb0d1530f074
+  version: 9be650865eab0c12963d8753212f4f9c66cdcf12
   subpackages:
   - mem
 - name: github.com/spf13/cast
-  version: d1139bab1c07d5ad390a65e7305876b3c1a8370b
+  version: f820543c3592e283e311a60d2a600a664e39f6f7
 - name: github.com/spf13/jwalterweatherman
   version: fa7ca7e836cf3a8bb4ebf799f472c12d7e903d66
 - name: github.com/spf13/pflag
-  version: 08b1a584251b5b62f458943640fc8ebd4d50aaa5
+  version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
 - name: github.com/spf13/viper
-  version: 5ed0fc31f7f453625df314d8e66b9791e8d13003
+  version: 7538d73b4eb9511d85a9f1dfef202eeb8ac260f4
 - name: github.com/vishvananda/netlink
   version: 87909c6dada5cba3aa659144a40b1e575d79d625
   subpackages:
   - nl
 - name: github.com/vishvananda/netns
-  version: 2c9454e4fc6e2edc1a1c84e64ed3d6e662fb6991
+  version: 54f0e4339ce73702a0607f49922aaa1e749b418d
 - name: golang.org/x/net
-  version: f2499483f923065a842d38eb4c7f1927e6fc6e6d
+  version: 6b27048ae5e6ad1ef927e72e437531493de612fe
   subpackages:
   - context
   - http2
@@ -93,16 +94,16 @@ imports:
   - lex/httplex
   - trace
 - name: golang.org/x/sys
-  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
+  version: 075e574b89e4c2d22f2286a7e2b919519c6f3547
   subpackages:
   - unix
 - name: golang.org/x/text
-  version: 2910a502d2bf9e43193af9d68ca516529614eed3
+  version: 767daa157b4d460bba02409ff856ddeeb8e76ab7
   subpackages:
   - transform
   - unicode/norm
 - name: google.golang.org/grpc
-  version: 2b7e876a2eb64e93cb8140f497d3ea9d8882279c
+  version: 708a7f9f3283aa2d4f6132d287d78683babe55c8
   subpackages:
   - codes
   - credentials
@@ -111,9 +112,11 @@ imports:
   - metadata
   - naming
   - peer
+  - stats
+  - tap
   - transport
 - name: gopkg.in/tomb.v2
   version: d5d1b5820637886def9eef33e03a27a9f166942c
 - name: gopkg.in/yaml.v2
-  version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
+  version: a3f3340b5840cee44f372bddb5880fcbc419b46a
 testImports: []
