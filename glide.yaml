@@ -8,12 +8,7 @@ import:
   - iptables
 - package: github.com/jessevdk/go-flags
 - package: github.com/osrg/gobgp
-  version: unnumbered
-  repo: https://github.com/ishidawataru/gobgp.git
-  vcs: git
-  subpackages:
-  - api
-  - packet/bgp
+  version: 7f95cdc871e21d194ebfaf9c10d0596f17ff2971
 - package: github.com/spf13/viper
 - package: golang.org/x/net
   subpackages:
